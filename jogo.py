@@ -2,6 +2,13 @@ import math
 import random
 import sys
 import pygame
+import uuid
+import json
+
+from npc_brain import NPCBrain
+from rbc_engine import Solution
+from db_init import initialize_database
+from npc_face import NPCFace
 
 # Simples demo RTS com dois tanques (jogador + NPC)
 # Simple professional-but-small RTS-like demo with two tanks (player + NPC)
@@ -179,8 +186,8 @@ class NPCPerception:
     """
     def __init__(self, tank):
         self.tank = tank
-        self.vision_range = 400  # distância máxima de visão / max vision distance
-        self.vision_angle = 120  # ângulo de visão (graus) / vision angle (degrees)
+        self.vision_range = 800  # distância máxima de visão / max vision distance
+        self.vision_angle = 75  # ângulo de visão (graus) / vision angle (degrees) - reduzido para 75°
         self.last_seen_player_pos = None
         self.last_seen_player_angle = None
         self.perception_memory = []
@@ -299,6 +306,8 @@ class Game:
         self.font = pygame.font.Font(None, 28)
         # Small font reused for logs and small UI to avoid recreating every frame
         self.small_font = pygame.font.Font(None, 20)
+        self.font_small = pygame.font.Font(None, 18)
+        self.font_tiny = pygame.font.Font(None, 14)
         # Title fonts reused
         self.menu_title_font = pygame.font.Font(None, 64)
         self.section_title_font = pygame.font.Font(None, 48)
@@ -315,6 +324,19 @@ class Game:
 
         # options / opções
         self.options = {"difficulty": "Normal", "projectile_speed": 420}
+        
+        # RBC Engine / Motor RBC
+        initialize_database(force_reset=False)  # Inicializa BD com seed cases
+        self.npc_brain = NPCBrain("npc_cases.db")
+        self.current_session_id = None
+        self.action_frame_counter = 0  # Para tracking de ações
+        
+        # NPC Face / Carinha do NPC
+        self.npc_face = NPCFace(width=60, height=60)
+        
+        # Debug mode / Modo debug
+        self.debug_mode = False  # Toggle com 'D'
+        self.frame_counter = 0  # Para logging periódico
 
     def setup_menu(self):
         center_x = SCREEN_WIDTH // 2
@@ -365,6 +387,11 @@ class Game:
             self.player.health = 100
             self.npc.health = 100
 
+        # Inicializa sessão RBC
+        self.current_session_id = str(uuid.uuid4())
+        self.npc_brain.set_session(self.current_session_id)
+        self.action_frame_counter = 0
+
         self.state = "playing"
 
     def run(self):
@@ -391,7 +418,10 @@ class Game:
                 if ev.type == pygame.KEYDOWN:
                     if ev.key == pygame.K_ESCAPE:
                         self.state = "menu"
-                    if ev.key == pygame.K_SPACE:
+                    elif ev.key == pygame.K_d:  # Toggle debug mode
+                        self.debug_mode = not self.debug_mode
+                        print(f"Debug mode: {'ON' if self.debug_mode else 'OFF'}")
+                    elif ev.key == pygame.K_SPACE:
                         # Dispara projétil / Fire projectile
                         if self.player.can_fire():
                             self.player.fire()
@@ -410,6 +440,8 @@ class Game:
 
     def update(self, dt):
         if self.state == "playing":
+            self.frame_counter += 1
+            
             keys = pygame.key.get_pressed()
             # Movimento do jogador: apenas eixo Y / Player movement: only Y axis
             if keys[pygame.K_UP]:
@@ -446,9 +478,26 @@ class Game:
                 if p.owner is not self.player and self._collide_proj_tank(p, self.player):
                     self.player.hit(p.damage)
                     p.is_alive = False
+                    # NPC acertou: registro de aprendizado
+                    self.npc_brain.report_outcome(
+                        success=True,
+                        damage_dealt=p.damage,
+                        damage_taken=0,
+                        outcome_type="hit",
+                        difficulty=self.options.get("difficulty", "Normal")
+                    )
+                    
                 if p.owner is not self.npc and self._collide_proj_tank(p, self.npc):
                     self.npc.hit(p.damage)
                     p.is_alive = False
+                    # NPC recebeu dano
+                    self.npc_brain.report_outcome(
+                        success=False,
+                        damage_dealt=0,
+                        damage_taken=p.damage,
+                        outcome_type="damaged",
+                        difficulty=self.options.get("difficulty", "Normal")
+                    )
 
             # Remove projéteis mortos / remove dead projectiles
             self.projectiles = [p for p in self.projectiles if p.is_alive]
@@ -466,51 +515,209 @@ class Game:
         return dist_sq <= (hit_r + p.radius) ** 2
 
     def _update_npc_ai(self, dt):
-        # ===== IA DO NPC - IMPLEMENTAÇÃO BÁSICA =====
-        # NPC AI - BASIC IMPLEMENTATION
-        # Pode ser expandida com: pathfinding, predição, estratégias avançadas, etc
-        # Can be expanded with: pathfinding, prediction, advanced strategies, etc
+        """
+        IA do NPC usando RBC (Case-Based Reasoning).
+        NPC AI using RBC (Case-Based Reasoning).
+        """
+        # Calcula frames desde última visão do jogador
+        frames_since_seen = 0
+        if not self.npc_perception.last_seen_player_pos:
+            frames_since_seen = self.action_frame_counter
+
+        # Usa RBC Brain para decidir ação
+        difficulty = self.options.get("difficulty", "Normal")
+        action = self.npc_brain.decide_action(
+            npc_x=self.npc.x,
+            npc_y=self.npc.y,
+            npc_angle=self.npc.angle,
+            npc_health=self.npc.health,
+            player_x=self.player.x,
+            player_y=self.player.y,
+            player_health=self.player.health,
+            player_visible=self.npc_perception.last_seen_player_pos is not None,
+            frames_since_last_seen=frames_since_seen,
+            difficulty=difficulty
+        )
         
+        # Atualiza expressão da carinha do NPC / Update NPC face expression
+        can_see = self.npc_perception.last_seen_player_pos is not None
+        angle_to_player = math.degrees(math.atan2(self.player.y - self.npc.y, self.player.x - self.npc.x))
+        angle_diff = abs(angle_to_player - self.npc.angle)
+        if angle_diff > 180:
+            angle_diff = 360 - angle_diff
+        
+        self.npc_face.update_expression(
+            action=action.action,
+            can_see=can_see,
+            health=self.npc.health,
+            angle_diff=angle_diff
+        )
+
+        # DEBUG: Mostra estado do NPC
+        if self.debug_mode and self.frame_counter % 30 == 0:  # A cada 30 frames (~500ms)
+            dist = math.sqrt((self.player.x - self.npc.x)**2 + (self.player.y - self.npc.y)**2)
+            can_see = self.npc_perception.last_seen_player_pos is not None
+            angle_to_player = math.degrees(math.atan2(self.player.y - self.npc.y, self.player.x - self.npc.x))
+            angle_diff = abs(angle_to_player - self.npc.angle)
+            if angle_diff > 180:
+                angle_diff = 360 - angle_diff
+            print(f"[GAME] Dist: {dist:.0f}px | Angle diff: {angle_diff:.1f}° | Perception sees: {can_see}")
+            print(f"[NPC] Action chosen: {action.action} | last_seen_player_pos: {self.npc_perception.last_seen_player_pos}")
+
+        # Executa ação decidida pelo RBC
+        self._execute_npc_action(action, dt)
+        
+        # Limpa frame counter quando vê o jogador
         if self.npc_perception.last_seen_player_pos:
-            # NPC VÊ o jogador / NPC SEES the player
-            target_y = self.npc_perception.last_seen_player_pos[1]
-            
-            # 1. Tenta seguir o jogador no eixo Y / Try to follow player on Y axis
-            if abs(target_y - self.npc.y) > 10:
-                direction = 1 if target_y > self.npc.y else -1
-                self.npc.move_y(direction, dt)
-            
-            # 2. Rotaciona para encarar o jogador / Rotate to face player
-            dx = self.npc_perception.last_seen_player_pos[0] - self.npc.x
-            dy = self.npc_perception.last_seen_player_pos[1] - self.npc.y
-            angle_to_target = math.degrees(math.atan2(dy, dx))
-            
-            # TODO: REFINAMENTO FUTURO - Adicionar imprecisão (inaccuracy)
-            # FUTURE REFINEMENT - Add inaccuracy to shots for difficulty variation
-            self.npc.angle = self._approach_angle(self.npc.angle, angle_to_target, self.npc.rot_speed * dt)
-            
-            # 3. Dispara se tem boa visão do alvo / Fire if has good view of target
+            self.action_frame_counter = 0
+        else:
+            self.action_frame_counter += 1
+
+    def _execute_npc_action(self, action: Solution, dt: float) -> None:
+        """
+        Executa ação decidida pelo RBC.
+        Execute RBC-decided action.
+        
+        Args:
+            action: Solução/ação a executar
+            dt: Delta time
+        """
+        action_type = action.action
+        
+        # Desserializa params de JSON string para dict / Deserialize params from JSON string to dict
+        if isinstance(action.params, str):
+            try:
+                params = json.loads(action.params)
+            except (json.JSONDecodeError, TypeError):
+                params = {}
+        else:
+            params = action.params if action.params else {}
+
+        # Quick sub-cone fire: if the player is inside a tighter firing cone, fire immediately
+        # This helps ensure NPC shoots even when it's still rotating to align.
+        if self.npc_perception.last_seen_player_pos:
+            pdx = self.player.x - self.npc.x
+            pdy = self.player.y - self.npc.y
+            p_dist = math.hypot(pdx, pdy)
+            p_angle = math.degrees(math.atan2(pdy, pdx))
+            p_ang_diff = abs(p_angle - self.npc.angle)
+            if p_ang_diff > 180:
+                p_ang_diff = 360 - p_ang_diff
+
+            # Sub-cone settings
+            subcone_angle = 12  # degrees
+            subcone_range = min(self.npc_perception.vision_range, 900)
+
+            if p_dist <= subcone_range and p_ang_diff <= subcone_angle:
+                # Fire immediately toward the player's current position (respect cooldown)
+                if self.npc.can_fire():
+                    self.npc.fire()
+                    fire_angle = p_angle
+                    proj = Projectile(
+                        self.npc.x + math.cos(math.radians(fire_angle)) * 40,
+                        self.npc.y + math.sin(math.radians(fire_angle)) * 40,
+                        fire_angle, self.npc,
+                        speed=self.options.get("projectile_speed", 420)
+                    )
+                    self.projectiles.append(proj)
+                    self.npc_perception.log_event("FIRE", f"subcone {int(fire_angle)}°")
+                    if self.debug_mode:
+                        print(f"[SUBCONE] Fired at player: dist={p_dist:.0f}px ang_diff={p_ang_diff:.1f}° angle={fire_angle:.0f}°")
+                    # avoid double-firing in this frame by returning early
+                    return
+
+        # DEBUG: Log de ações executadas
+        if self.debug_mode and self.frame_counter % 30 == 0:
+            print(f"[EXECUTE] Action: {action_type} | Params: {params}")
+
+        # Fire: dispara na direção atual
+        if action_type == "fire":
             self.last_ai_shot += dt
             if self.last_ai_shot >= self.ai_shot_interval:
                 self.last_ai_shot = 0
-                # TODO: REFINAMENTO FUTURO - Adicionar delay de reação (reaction delay)
-                # FUTURE REFINEMENT - Add reaction delay for human-like AI
-                if random.random() < 0.8:  # Chance de acertar / Chance to hit
-                    if self.npc.can_fire():
-                        self.npc.fire()
-                        # TODO: REFINAMENTO FUTURO - Adicionar predição de movimento (lead shots)
-                        # FUTURE REFINEMENT - Predict player movement for leading shots
-                        proj = Projectile(self.npc.x + math.cos(math.radians(self.npc.angle)) * 40,
-                                           self.npc.y + math.sin(math.radians(self.npc.angle)) * 40,
-                                           self.npc.angle, self.npc, speed=self.options.get("projectile_speed", 420))
-                        self.projectiles.append(proj)
-                        self.npc_perception.log_event("SHOT", f"ângulo {int(self.npc.angle)}°")
-        else:
-            # NPC PERDEU o jogador / NPC LOST the player
-            # TODO: REFINAMENTO FUTURO - Implementar busca inteligente / FUTURE: implement smart search
-            if random.random() < 0.1:
-                self.npc.rotate(random.choice([-1, 1]), dt * 5)
-            self.npc_perception.log_event("SEARCHING", "Alvo perdido, procurando...")
+                if self.npc.can_fire():
+                    self.npc.fire()
+                    angle_adj = params.get("angle_adjustment", 0)
+                    fire_angle = self.npc.angle + angle_adj
+                    proj = Projectile(
+                        self.npc.x + math.cos(math.radians(fire_angle)) * 40,
+                        self.npc.y + math.sin(math.radians(fire_angle)) * 40,
+                        fire_angle, self.npc,
+                        speed=self.options.get("projectile_speed", 420)
+                    )
+                    self.projectiles.append(proj)
+                    self.npc_perception.log_event("FIRE", f"ângulo {int(fire_angle)}°")
+                    if self.debug_mode:
+                        print(f"  ✓ FIRED at angle {fire_angle:.0f}°")
+
+        # Align and fire: alinha antes de disparar
+        elif action_type == "align_and_fire":
+            # Calcula ângulo absoluto do jogador / Calculate absolute angle to player
+            if self.npc_perception.last_seen_player_pos:
+                dx = self.npc_perception.last_seen_player_pos[0] - self.npc.x
+                dy = self.npc_perception.last_seen_player_pos[1] - self.npc.y
+                target_angle = math.degrees(math.atan2(dy, dx))
+            else:
+                target_angle = self.npc.angle
+            
+            # Alinha em direção ao alvo / Align toward target
+            self.npc.angle = self._approach_angle(self.npc.angle, target_angle, self.npc.rot_speed * dt)
+            
+            # Tenta disparar após estar alinhado / Try to fire once aligned
+            self.last_ai_shot += dt
+            # Use a slightly faster rate for align-and-fire attempts so NPC isn't too passive
+            if self.last_ai_shot >= max(0.2, self.ai_shot_interval * 0.6):
+                self.last_ai_shot = 0
+                # Calcula ângulo atual vs alvo / Calculate current angle vs target
+                angle_diff = abs(target_angle - self.npc.angle)
+                if angle_diff > 180:
+                    angle_diff = 360 - angle_diff
+                
+                # Dispara se alinhado o suficiente / Fire if aligned enough
+                # Use tolerância maior para garantir que NPC atire enquanto se ajusta
+                if self.npc.can_fire() and angle_diff < 40:  # Tolerância de 40° para ser mais agressivo
+                    self.npc.fire()
+                    proj = Projectile(
+                        self.npc.x + math.cos(math.radians(self.npc.angle)) * 40,
+                        self.npc.y + math.sin(math.radians(self.npc.angle)) * 40,
+                        self.npc.angle, self.npc,
+                        speed=self.options.get("projectile_speed", 420)
+                    )
+                    self.projectiles.append(proj)
+                    self.npc_perception.log_event("FIRE", f"ângulo {int(self.npc.angle)}°")
+                    if self.debug_mode:
+                        print(f"  ✓ FIRED (aligned) at angle {self.npc.angle:.0f}° | ang_diff={angle_diff:.1f}°")
+
+        # Pursue: persegue o jogador
+        elif action_type == "pursue":
+            if self.npc_perception.last_seen_player_pos:
+                target_y = self.npc_perception.last_seen_player_pos[1]
+                speed_multiplier = params.get("speed", 1.0)
+                # Prevent too-slow pursuit due to low multipliers; keep reasonable minimum
+                if speed_multiplier < 0.6:
+                    speed_multiplier = 0.6
+
+                if abs(target_y - self.npc.y) > 10:
+                    direction = 1 if target_y > self.npc.y else -1
+                    self.npc.move_y(direction * speed_multiplier, dt)
+                
+                # Rotaciona para encarar jogador
+                if params.get("rotate", True):
+                    dx = self.npc_perception.last_seen_player_pos[0] - self.npc.x
+                    dy = self.npc_perception.last_seen_player_pos[1] - self.npc.y
+                    angle_to_target = math.degrees(math.atan2(dy, dx))
+                    self.npc.angle = self._approach_angle(self.npc.angle, angle_to_target, self.npc.rot_speed * dt)
+
+        # Search: procura pelo jogador
+        elif action_type == "search":
+            rotation_dir = params.get("rotation_direction", 1)
+            self.npc.rotate(rotation_dir, dt * 0.7)
+            self.npc_perception.log_event("SEARCH", "Procurando alvo...")
+
+        # Idle: fica parado
+        elif action_type == "idle":
+            pass
+
 
     def _approach_angle(self, src, trg, step):
         # Move src toward trg by at most step (degrees), handling wrap-around
@@ -591,25 +798,19 @@ class Game:
             elif lang_en_rect.collidepoint(mouse_pos):
                 self._set_language("EN")
 
-        # Opções de dificuldade / Difficulty options with better formatting
-        y = 230
-        # aumentar a caixa para caber os botões centralizados
-        diff_section_bg = pygame.Rect(40, y - 10, SCREEN_WIDTH - 80, 110)
-        pygame.draw.rect(self.screen, (35, 40, 50), diff_section_bg, border_radius=6)
-        pygame.draw.rect(self.screen, (80, 100, 120), diff_section_bg, 1, border_radius=6)
-
-        diff_label = self.font.render(STRINGS[self.language]["difficulty"] + ":", True, (210, 210, 210))
+        # Opções de dificuldade / Difficulty options
+        y = 240
+        diff_label = self.font.render(STRINGS[self.language]["difficulty"] + ": " + self.options.get("difficulty", "Normal"), True, (210, 210, 210))
         self.screen.blit(diff_label, (60, y))
 
         diffs = ["Easy", "Normal", "Hard"]
         diffs_display = [STRINGS[self.language]["easy"], STRINGS[self.language]["normal"], STRINGS[self.language]["hard"]]
-        y += 30
-        # Botões centralizados com largura menor e gap controlado
+        y += 35
         btn_w = 120
         btn_h = 40
-        btn_gap = 24
+        btn_gap = 20
         total_w = 3 * btn_w + 2 * btn_gap
-        start_x = max(60, (SCREEN_WIDTH - total_w) // 2)
+        start_x = (SCREEN_WIDTH - total_w) // 2
 
         for i, (d, d_display) in enumerate(zip(diffs, diffs_display)):
             color = (100, 200, 100) if self.options.get("difficulty") == d else (150, 150, 150)
@@ -620,19 +821,14 @@ class Game:
             # clickable
             if pygame.mouse.get_pressed()[0] and rect.collidepoint(pygame.mouse.get_pos()):
                 self.options["difficulty"] = d
-        # Controle de velocidade de projétil / Projectile speed with better formatting
-        # posiciona abaixo da caixa de dificuldade aumentada e centraliza
-        y = 370
-        speed_section_bg = pygame.Rect(40, y - 10, SCREEN_WIDTH - 80, 70)
-        pygame.draw.rect(self.screen, (35, 40, 50), speed_section_bg, border_radius=6)
-        pygame.draw.rect(self.screen, (80, 100, 120), speed_section_bg, 1, border_radius=6)
 
+        # Controle de velocidade de projétil / Projectile speed
+        y = 370
         speed_label = self.font.render(STRINGS[self.language]["projectile_speed"], True, (210, 210, 210))
         self.screen.blit(speed_label, (60, y))
 
         speed = self.options.get("projectile_speed", 420)
         speed = max(260, min(700, speed))
-        # Ajusta com setas / adjust with left/right keys
         keys = pygame.key.get_pressed()
         if keys[pygame.K_LEFT]:
             speed = max(260, speed - 4)
@@ -640,37 +836,65 @@ class Game:
             speed = min(700, speed + 4)
         self.options["projectile_speed"] = speed
 
-        # Render value centered in section
         val = self.font.render(str(int(speed)), True, (220, 220, 220))
         val_x = (SCREEN_WIDTH // 2) - (val.get_width() // 2)
         self.screen.blit(val, (val_x, y + 28))
+        
+        # Opções de dificuldade / Difficulty options - moved to left panel above
 
         info = self.font.render(STRINGS[self.language]["esc_menu"], True, (150, 150, 150))
         self.screen.blit(info, (60, SCREEN_HEIGHT - 60))
 
     def _draw_game(self):
-        # Desenha o jogo / Draw the game
-        self.screen.fill((50, 120, 50))
-        # Limites da arena / simple arena boundaries
-        pygame.draw.rect(self.screen, (30, 30, 30), (ARENA_LEFT, ARENA_TOP, ARENA_RIGHT - ARENA_LEFT, ARENA_BOTTOM - ARENA_TOP), 4)
+            # Desenha o jogo / Draw the game
+            self.screen.fill((50, 120, 50))
+            # Limites da arena
+            pygame.draw.rect(self.screen, (30, 30, 30), (ARENA_LEFT, ARENA_TOP, ARENA_RIGHT - ARENA_LEFT, ARENA_BOTTOM - ARENA_TOP), 4)
 
-        # Desenha tanques / draw tanks
-        self.player.draw(self.screen)
-        self.npc.draw(self.screen)
+            # Desenha tanques e projéteis
+            self.player.draw(self.screen)
+            self.npc.draw(self.screen)
+            for p in self.projectiles:
+                p.draw(self.screen)
 
-        # Projéteis / projectiles
-        for p in self.projectiles:
-            p.draw(self.screen)
+            if self.debug_mode:
+                self._draw_debug()
 
-        # Barras de vida / HUD: health bars
-        self._draw_health_bar(self.player, 20, 20)
-        self._draw_health_bar(self.npc, SCREEN_WIDTH - 220, 20)
+            # 1. Barras de Vida (Mantidas nas extremidades)
+            self._draw_health_bar(self.player, 20, 20)
+            self._draw_health_bar(self.npc, SCREEN_WIDTH - 220, 20)
+            
+            # === 2. NOVA BOX DE STATUS (DIFICULDADE + VELOCIDADE) ===
+            # Reduzimos a largura para 220 e movemos para a esquerda (x=240)
+            status_x = 240 
+            status_y = 15
+            status_w = 230
+            status_h = 75 # Um pouco mais baixa para ficar elegante
+            
+            status_bg = pygame.Rect(status_x, status_y, status_w, status_h)
+            pygame.draw.rect(self.screen, (40, 45, 55), status_bg, border_radius=6)
+            pygame.draw.rect(self.screen, (70, 90, 110), status_bg, 2, border_radius=6)
+            
+            # Textos internos (Dificuldade e Velocidade)
+            diff_text = STRINGS[self.language]["difficulty"] + ": " + self.options.get("difficulty", "Normal")
+            diff_label = self.small_font.render(diff_text, True, (230, 230, 230))
+            self.screen.blit(diff_label, (status_x + 10, status_y + 12))
+            
+            speed_val = int(self.options.get("projectile_speed", 420))
+            speed_text = STRINGS[self.language]["speed_label"] + " " + str(speed_val)
+            speed_label = self.small_font.render(speed_text, True, (200, 200, 200))
+            self.screen.blit(speed_label, (status_x + 10, status_y + 40))
+            
+            # === 3. CARINHA DO NPC (AGORA NO CENTRO-DIREITA) ===
+            # Posicionada logo após a box de status
+            face_x = status_x + status_w + 80
+            face_y = 15
+            self.npc_face.draw(self.screen, face_x, face_y)
+            
+            # 4. Log e Percepção
+            self._draw_perception_log()
         
-        # Caixa de percepção do NPC: apenas log (bilingue) / NPC perception: only the log (bilingual)
-        self._draw_perception_log()
-        
-        # Caixa de informações do jogo / Game info box
-        self._draw_game_info_box()
+
 
     def _draw_health_bar(self, tank, x, y):
         # Desenha barra de vida / Draw health bar
@@ -683,6 +907,125 @@ class Game:
         pygame.draw.rect(self.screen, col, (x + 2, y + 2, inner_w - 4 if inner_w > 4 else 0, h - 4), border_radius=6)
         name = self.font.render(tank.name, True, (240, 240, 240))
         self.screen.blit(name, (x, y + h + 6))
+    
+    def _draw_debug(self):
+        """
+        Desenha elementos de debug: hitbox, campo de visão, informações.
+        Draw debug elements: hitbox, vision cone, information.
+        """
+        # Desenha hitbox dos tanques (retângulos)
+        # Draw tank hitboxes (rectangles)
+        pygame.draw.rect(self.screen, (255, 100, 100), (
+            self.player.x - self.player.width // 2,
+            self.player.y - self.player.height // 2,
+            self.player.width,
+            self.player.height
+        ), 2)
+        
+        pygame.draw.rect(self.screen, (255, 150, 150), (
+            self.npc.x - self.npc.width // 2,
+            self.npc.y - self.npc.height // 2,
+            self.npc.width,
+            self.npc.height
+        ), 2)
+        
+        # Desenha campo de visão do NPC (cone)
+        # Draw NPC vision cone
+        vision_range = self.npc_perception.vision_range
+        vision_angle = self.npc_perception.vision_angle
+        
+        # Linha central de visão / Center vision line
+        end_x = self.npc.x + vision_range * math.cos(math.radians(self.npc.angle))
+        end_y = self.npc.y + vision_range * math.sin(math.radians(self.npc.angle))
+        pygame.draw.line(self.screen, (100, 255, 100), (self.npc.x, self.npc.y), (end_x, end_y), 1)
+        
+        # Arco do cone de visão (usa pontos para desenhar)
+        # Vision cone arc
+        points = []
+        for angle in range(int(self.npc.angle - vision_angle // 2), 
+                          int(self.npc.angle + vision_angle // 2) + 1, 5):
+            x = self.npc.x + vision_range * math.cos(math.radians(angle))
+            y = self.npc.y + vision_range * math.sin(math.radians(angle))
+            points.append((int(x), int(y)))
+        
+        # Desenha arco apenas se temos pontos válidos
+        if len(points) > 1:
+            try:
+                pygame.draw.lines(self.screen, (100, 255, 100), False, points, 1)
+            except TypeError:
+                pass  # Ignora se houver erro nos pontos
+        
+        # Linhas laterais do cone / Cone sides
+        angle_left = self.npc.angle - vision_angle // 2
+        angle_right = self.npc.angle + vision_angle // 2
+        
+        x_left = self.npc.x + vision_range * math.cos(math.radians(angle_left))
+        y_left = self.npc.y + vision_range * math.sin(math.radians(angle_left))
+        pygame.draw.line(self.screen, (100, 255, 100), (self.npc.x, self.npc.y), (x_left, y_left), 1)
+        
+        x_right = self.npc.x + vision_range * math.cos(math.radians(angle_right))
+        y_right = self.npc.y + vision_range * math.sin(math.radians(angle_right))
+        pygame.draw.line(self.screen, (100, 255, 100), (self.npc.x, self.npc.y), (x_right, y_right), 1)
+        
+        # Sub-cone de tiro (pequeno ângulo interno) / Small firing sub-cone
+        subcone_angle = 12
+        subcone_range = min(vision_range, 900)
+        left_sc = self.npc.angle - subcone_angle
+        right_sc = self.npc.angle + subcone_angle
+        x_left_sc = self.npc.x + subcone_range * math.cos(math.radians(left_sc))
+        y_left_sc = self.npc.y + subcone_range * math.sin(math.radians(left_sc))
+        x_right_sc = self.npc.x + subcone_range * math.cos(math.radians(right_sc))
+        y_right_sc = self.npc.y + subcone_range * math.sin(math.radians(right_sc))
+        # linhas laterais do subcone em amarelo
+        pygame.draw.line(self.screen, (255, 210, 80), (self.npc.x, self.npc.y), (x_left_sc, y_left_sc), 2)
+        pygame.draw.line(self.screen, (255, 210, 80), (self.npc.x, self.npc.y), (x_right_sc, y_right_sc), 2)
+        # Arco do subcone (mais suave)
+        sc_points = []
+        step = 2
+        for angle in range(int(left_sc), int(right_sc) + 1, step):
+            x = self.npc.x + subcone_range * math.cos(math.radians(angle))
+            y = self.npc.y + subcone_range * math.sin(math.radians(angle))
+            sc_points.append((int(x), int(y)))
+        if len(sc_points) > 1:
+            pygame.draw.lines(self.screen, (255, 210, 80), False, sc_points, 2)
+
+        # Desenha linha de visão até o jogador / Line to player
+        if self.npc_perception.last_seen_player_pos:
+            pygame.draw.line(self.screen, (0, 255, 0), 
+                            (int(self.npc.x), int(self.npc.y)),
+                            (int(self.npc_perception.last_seen_player_pos[0]), 
+                             int(self.npc_perception.last_seen_player_pos[1])), 2)
+            # Marca última posição vista / Mark last seen position
+            pygame.draw.circle(self.screen, (0, 255, 0), 
+                             (int(self.npc_perception.last_seen_player_pos[0]), 
+                              int(self.npc_perception.last_seen_player_pos[1])), 4, 1)
+        
+        # Desenha linha até o jogador atual (para referência)
+        pygame.draw.line(self.screen, (200, 100, 200), 
+                        (int(self.npc.x), int(self.npc.y)),
+                        (int(self.player.x), int(self.player.y)), 1)
+        
+        # Desenha informações de debug no topo / Draw debug info at top
+        dist = math.sqrt((self.player.x - self.npc.x)**2 + (self.player.y - self.npc.y)**2)
+        angle_to_player = math.degrees(math.atan2(self.player.y - self.npc.y, self.player.x - self.npc.x))
+        angle_diff = abs(angle_to_player - self.npc.angle)
+        if angle_diff > 180:
+            angle_diff = 360 - angle_diff
+        
+        debug_info = [
+            f"DEBUG MODE (Press D to toggle)",
+            f"Distance: {dist:.0f}px | NPC Angle: {self.npc.angle:.1f}°",
+            f"Player Angle: {angle_to_player:.1f}° | Diff: {angle_diff:.1f}°",
+            f"Vision: Range={vision_range}px, Cone={vision_angle}°",
+            f"Can See: {self.npc_perception.last_seen_player_pos is not None} (need dist < {vision_range} AND angle diff < {vision_angle/2:.0f}°)",
+            f"InSubcone: {dist <= subcone_range and angle_diff <= subcone_angle} (need dist < {subcone_range} AND angle diff < {subcone_angle}°)",
+        ]
+        
+        y_offset = ARENA_TOP + 10
+        for line in debug_info:
+            text = self.small_font.render(line, True, (255, 255, 0))
+            self.screen.blit(text, (10, y_offset))
+            y_offset += 20
     
     def _draw_npc_perception_box(self):
         # Desenha caixa mostrando o que o NPC vê / Draw box showing what NPC sees
@@ -764,30 +1107,7 @@ class Game:
             log_text = self.small_font.render(truncated, True, (150, 200, 150))
             self.screen.blit(log_text, (log_x + 10, log_y + 8 + self.small_font.get_height() + i * line_h))
     
-    def _draw_game_info_box(self):
-        # Desenha caixa com informações do jogo / Draw box with game info
-        box_x = SCREEN_WIDTH // 2 - 200
-        box_y = 10
-        box_w = 400
-        box_h = 50
-        
-        # Fundo da caixa / Background
-        pygame.draw.rect(self.screen, (30, 30, 40), (box_x, box_y, box_w, box_h), border_radius=6)
-        pygame.draw.rect(self.screen, (100, 120, 140), (box_x, box_y, box_w, box_h), 2, border_radius=6)
-        
-        # Dificuldade / Difficulty
-        diff_key = STRINGS[self.language]["difficulty"]
-        diff_value = STRINGS[self.language][self.options.get("difficulty", "normal").lower()]
-        diff_text = f"{diff_key}: {diff_value}"
-        diff_display = self.font.render(diff_text, True, (200, 200, 200))
-        self.screen.blit(diff_display, (box_x + 10, box_y + 8))
-        
-        # Velocidade do projétil / Projectile speed
-        speed_key = STRINGS[self.language]["speed_label"]
-        speed_value = int(self.options.get("projectile_speed", 420))
-        speed_text = f"{speed_key} {speed_value}"
-        speed_display = self.font.render(speed_text, True, (200, 200, 200))
-        self.screen.blit(speed_display, (box_x + 10, box_y + 28))
+
 
     def _draw_gameover(self):
         # Desenha tela de fim de jogo / Draw game over screen
@@ -803,13 +1123,49 @@ class Game:
         sub = self.font.render(winner, True, (210, 210, 210))
         self.screen.blit(sub, sub.get_rect(center=(SCREEN_WIDTH // 2, 220)))
 
+        # Exibe estatísticas RBC se disponível
+        self._draw_rbc_statistics()
+
         hint = self.font.render(STRINGS[self.language]["press_enter"], True, (160, 160, 160))
-        self.screen.blit(hint, hint.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 120)))
+        self.screen.blit(hint, hint.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 80)))
 
         # Trata tecla para retornar / handle key to return
         keys = pygame.key.get_pressed()
         if keys[pygame.K_RETURN]:
             self.state = "menu"
+
+    def _draw_rbc_statistics(self):
+        """Exibe estatísticas do motor RBC na tela de game over."""
+        stats = self.npc_brain.get_statistics()
+        
+        y_start = 320
+        box_x = SCREEN_WIDTH // 2 - 150
+        box_w = 300
+        box_h = 140
+        
+        # Fundo da caixa
+        pygame.draw.rect(self.screen, (20, 20, 30), (box_x, y_start, box_w, box_h), border_radius=6)
+        pygame.draw.rect(self.screen, (100, 120, 100), (box_x, y_start, box_w, box_h), 2, border_radius=6)
+        
+        # Título
+        title_txt = self.font.render("RBC Statistics", True, (100, 200, 100))
+        self.screen.blit(title_txt, (box_x + 10, y_start + 8))
+        
+        # Dados
+        y = y_start + 40
+        
+        total_txt = self.small_font.render(f"Total Cases: {stats['total_cases']}", True, (200, 200, 200))
+        self.screen.blit(total_txt, (box_x + 15, y))
+        y += 25
+        
+        seed_txt = self.small_font.render(f"Seed: {stats['seed_cases']} | Learned: {stats['learned_cases']}", True, (150, 150, 150))
+        self.screen.blit(seed_txt, (box_x + 15, y))
+        y += 25
+        
+        success_txt = self.small_font.render(f"Avg Success: {stats['avg_success_rate']:.1%}", True, (150, 200, 150))
+        self.screen.blit(success_txt, (box_x + 15, y))
+
+
 
 
 if __name__ == "__main__":
