@@ -1,0 +1,1 @@
+def initialize_database(force_reset=False): pass
