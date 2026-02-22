@@ -91,7 +91,7 @@ class Tank:
         self.x = x
         self.y = y
         self.color = color
-        self.angle = 0  # graus / degrees, 0 -> right
+        self.angle = 180  # graus / degrees, 0 -> right
         self.width = 60
         self.height = 36
         self.speed = 180  # pixels per second (only along Y / apenas eixo Y)
@@ -714,6 +714,15 @@ class Game:
             self.npc.rotate(rotation_dir, dt * 0.7)
             self.npc_perception.log_event("SEARCH", "Procurando alvo...")
 
+        elif action_type == "wander":
+            direction = params.get("direction", 1)
+            speed = params.get("speed", 0.5)
+            self.npc.move_y(direction * speed, dt)
+
+        elif action_type == "random_rotate":
+            direction = params.get("direction", 1)
+            self.npc.rotate(direction, dt)
+
         # Idle: fica parado
         elif action_type == "idle":
             pass
@@ -1158,7 +1167,11 @@ class Game:
         self.screen.blit(total_txt, (box_x + 15, y))
         y += 25
         
-        seed_txt = self.small_font.render(f"Seed: {stats['seed_cases']} | Learned: {stats['learned_cases']}", True, (150, 150, 150))
+        seed_txt = self.small_font.render(
+    f"Cases: {stats['total_cases']} | Avg Reward: {stats['avg_reward']:.2f}",
+    True,
+    (150, 150, 150)
+)
         self.screen.blit(seed_txt, (box_x + 15, y))
         y += 25
         

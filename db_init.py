@@ -2,39 +2,18 @@
 Utilitário para inicializar e gerenciar banco de dados RBC.
 Utility for initializing and managing RBC database.
 """
-
+from pathlib import Path
 from database import CaseDatabase
 from seed_cases import load_seed_cases
 
 
 def initialize_database(db_path: str = "npc_cases.db", force_reset: bool = False) -> CaseDatabase:
-    """
-    Inicializa banco de dados com seed cases se vazio.
-    Initialize database with seed cases if empty.
     
-    Args:
-        db_path: Caminho do banco de dados
-        force_reset: Se True, recria banco do zero
-        
-    Returns:
-        Instância de CaseDatabase inicializada
-    """
+    if force_reset:
+        Path(db_path).unlink(missing_ok=True)
+        print("Banco resetado. Iniciando vazio.")
+
     db = CaseDatabase(db_path)
-
-    stats = db.get_statistics()
-    
-    if force_reset or stats["total_cases"] == 0:
-        print("Carregando seed cases iniciais...")
-        seed_cases = load_seed_cases()
-        
-        for case in seed_cases:
-            db.insert_case(case)
-        
-        stats = db.get_statistics()
-        print(f"✓ Banco inicializado com {stats['seed_cases']} seed cases")
-    else:
-        print(f"✓ Banco já possui {stats['total_cases']} casos")
-
     return db
 
 

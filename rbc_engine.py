@@ -38,6 +38,7 @@ class Outcome:
     damage_dealt: float = 0.0  # Dano causado
     damage_taken: float = 0.0  # Dano recebido
     outcome_type: str = "unknown"  # 'hit', 'miss', 'evaded', 'safe'
+    reward: float = 0.0 # Sistema de pontos para o RBC
 
 
 class RBCEngine:
@@ -85,8 +86,19 @@ class RBCEngine:
         )
 
         if similar_cases:
-            # RBC: Usa melhor caso similar
-            best_case = similar_cases[0]
+            best_score = -9999
+            best_case = None
+
+            for case in similar_cases:
+                similarity = case.get("similarity", 0)
+                reward = case.get("result_reward", 1.0)
+
+                score = similarity * reward
+
+                if score > best_score:
+                    best_score = score
+                    best_case = case
+
             solution = self._adapt_solution(best_case, problem)
             self.last_case_id = best_case["case_id"]
         else:
@@ -141,24 +153,17 @@ class RBCEngine:
         session_id: str,
         difficulty: str
     ) -> None:
-        """
-        Aprende armazenando novo caso no banco.
-        Learn by storing new case in database.
-        
-        Args:
-            case_id: ID do caso (se None, novo caso é criado)
-            problem: Problema resolvido
-            solution: Solução utilizada
-            outcome: Resultado da solução
-            session_id: ID da sessão de jogo
-            difficulty: Dificuldade do jogo
-        """
-        # Se foi usado um caso existente, apenas atualiza estatísticas
+
+        # 🔥 Caso já existente → atualizar estatísticas
         if case_id:
-            self.db.update_case_usage(case_id, outcome.success)
+            self.db.update_case_usage(
+                case_id=case_id,
+                success=outcome.success,
+                reward=outcome.reward
+            )
             return
 
-        # Caso novo: armazena no banco
+        # 🔥 Caso novo
         new_case = {
             "problem_distance": problem.distance,
             "problem_angle_diff": problem.angle_diff,
@@ -166,12 +171,22 @@ class RBCEngine:
             "problem_player_health": problem.player_health,
             "problem_player_visible": problem.player_visible,
             "problem_frames_lost": problem.frames_lost,
+
             "solution_action": solution.action,
             "solution_params": solution.params,
+
             "result_success": outcome.success,
             "result_damage_dealt": outcome.damage_dealt,
             "result_damage_taken": outcome.damage_taken,
             "result_outcome": outcome.outcome_type,
+            "result_reward": outcome.reward,
+
+            # 🔥 Estatísticas iniciais
+            "usage_count": 1,
+            "success_count": 1 if outcome.success else 0,
+            "total_reward": outcome.reward,
+            "avg_reward": outcome.reward,
+
             "session_id": session_id,
             "difficulty": difficulty,
             "created_by": "learned",

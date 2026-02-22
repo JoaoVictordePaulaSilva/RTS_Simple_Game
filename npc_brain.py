@@ -44,7 +44,7 @@ class NPCBrain:
         player_visible: bool,
         frames_since_last_seen: int,
         difficulty: str = "Normal"
-    ) -> Solution:
+    ):
         """
         Decide ação do NPC baseado no estado atual.
         Decide NPC action based on current game state.
@@ -117,53 +117,34 @@ class NPCBrain:
         )
 
     def _generate_fallback_action(self, problem: Problem) -> Solution:
-        """
-        Gera ação padrão usando IA básica hardcoded.
-        Generate default action using basic hardcoded AI.
-        
-        Estratégia:
-        1. Se não vê: buscar
-        2. Se vê e está alinhado: disparar
-        3. Se vê mas desalinhado: alinhar e disparar
-        4. Se distante: perseguir enquanto dispara
-        """
-        # Jogador não visível: buscar / Player not visible: search
-        if not problem.player_visible:
-            return Solution(
-                action="search",
-                params={"rotation_direction": random.choice([-1, 1])}
-            )
+        import random
 
-        # Jogador visível e muito próximo (< 150px) e alinhado (< 20°): DISPARAR
-        if problem.distance < 150 and problem.angle_diff < 20:
-            return Solution(
-                action="fire",
-                params={"angle_adjustment": 0}
-            )
+        r = random.random()
 
-        # Jogador visível, próximo/médio (< 400px) e desalinhado: ALINHAR E DISPARAR
-        if problem.distance < 400 and problem.angle_diff >= 20:
+        # 40% mover aleatoriamente
+        if r < 0.4:
             return Solution(
-                action="align_and_fire",
+                action="wander",
                 params={
-                    "target_angle": problem.angle_diff,
-                    "speed": 0.8
+                    "direction": random.choice([-1, 1]),
+                    "speed": random.uniform(0.3, 0.9)
                 }
             )
 
-        # Jogador visível e próximo (< 300px) mesmo desalinhado: DISPARAR (tolerante)
-        if problem.distance < 300:
+        # 30% girar aleatoriamente
+        if r < 0.7:
             return Solution(
-                action="fire",
-                params={"angle_adjustment": 0}
+                action="random_rotate",
+                params={
+                    "direction": random.choice([-1, 1])
+                }
             )
 
-        # Jogador visível mas distante (>= 300px): PERSEGUIR e tentar alinhar
+        # 30% atirar totalmente desalinhado
         return Solution(
-            action="align_and_fire",
+            action="fire",
             params={
-                "target_angle": problem.angle_diff,
-                "speed": 1.0
+                "angle_adjustment": random.uniform(-60, 60)
             }
         )
 
@@ -173,7 +154,7 @@ class NPCBrain:
         damage_dealt: float = 0.0,
         damage_taken: float = 0.0,
         outcome_type: str = "unknown",
-        difficulty: str = "Normal"
+        difficulty: str = "Normal",
     ) -> None:
         """
         Relata resultado da ação para aprendizado.
@@ -196,6 +177,17 @@ class NPCBrain:
             damage_taken=damage_taken,
             outcome_type=outcome_type
         )
+
+        #Cálculo dos pontos para o aprendizado do RBC
+        reward = 0.0 
+
+        if success:
+            reward += 5.0
+
+        reward += damage_dealt * 0.2
+        reward -= damage_taken * 0.3 
+
+        outcome.reward = reward
 
         # Aprende armazenando no banco
         self.rbc_engine.learn(
