@@ -421,6 +421,8 @@ class Game:
                     elif ev.key == pygame.K_d:  # Toggle debug mode
                         self.debug_mode = not self.debug_mode
                         print(f"Debug mode: {'ON' if self.debug_mode else 'OFF'}")
+                    elif ev.key == pygame.K_r and self.debug_mode:  # Reset game and database (debug only)
+                        self.reset_game_and_database()
                     elif ev.key == pygame.K_SPACE:
                         # Dispara projétil / Fire projectile
                         if self.player.can_fire():
@@ -609,10 +611,11 @@ class Game:
             subcone_range = min(self.npc_perception.vision_range, 900)
 
             if p_dist <= subcone_range and p_ang_diff <= subcone_angle:
-                # Fire immediately toward the player's current position (respect cooldown)
+                # Fire immediately using NPC's current visual angle (must be aligned first)
                 if self.npc.can_fire():
                     self.npc.fire()
-                    fire_angle = p_angle
+                    # SEMPRE usa o ângulo visual atual do NPC
+                    fire_angle = self.npc.angle
                     proj = Projectile(
                         self.npc.x + math.cos(math.radians(fire_angle)) * 40,
                         self.npc.y + math.sin(math.radians(fire_angle)) * 40,
@@ -622,7 +625,7 @@ class Game:
                     self.projectiles.append(proj)
                     self.npc_perception.log_event("FIRE", f"subcone {int(fire_angle)}°")
                     if self.debug_mode:
-                        print(f"[SUBCONE] Fired at player: dist={p_dist:.0f}px ang_diff={p_ang_diff:.1f}° angle={fire_angle:.0f}°")
+                        print(f"[SUBCONE] Fired at NPC angle: dist={p_dist:.0f}px ang_diff={p_ang_diff:.1f}° angle={fire_angle:.0f}°")
                     # avoid double-firing in this frame by returning early
                     return
 
@@ -630,15 +633,15 @@ class Game:
         if self.debug_mode and self.frame_counter % 30 == 0:
             print(f"[EXECUTE] Action: {action_type} | Params: {params}")
 
-        # Fire: dispara na direção atual
+        # Fire: dispara na direção atual (SEMPRE usa ângulo visual do NPC)
         if action_type == "fire":
             self.last_ai_shot += dt
             if self.last_ai_shot >= self.ai_shot_interval:
                 self.last_ai_shot = 0
                 if self.npc.can_fire():
                     self.npc.fire()
-                    angle_adj = params.get("angle_adjustment", 0)
-                    fire_angle = self.npc.angle + angle_adj
+                    # SEMPRE usa o ângulo visual atual do NPC - sem ajustes!
+                    fire_angle = self.npc.angle
                     proj = Projectile(
                         self.npc.x + math.cos(math.radians(fire_angle)) * 40,
                         self.npc.y + math.sin(math.radians(fire_angle)) * 40,
@@ -648,7 +651,7 @@ class Game:
                     self.projectiles.append(proj)
                     self.npc_perception.log_event("FIRE", f"ângulo {int(fire_angle)}°")
                     if self.debug_mode:
-                        print(f"  ✓ FIRED at angle {fire_angle:.0f}°")
+                        print(f"  ✓ FIRED at NPC visual angle {fire_angle:.0f}°")
 
         # Align and fire: alinha antes de disparar
         elif action_type == "align_and_fire":
@@ -1021,13 +1024,17 @@ class Game:
         if angle_diff > 180:
             angle_diff = 360 - angle_diff
         
+        # Pega estatísticas do RBC
+        rbc_stats = self.npc_brain.get_statistics()
+        
         debug_info = [
-            f"DEBUG MODE (Press D to toggle)",
+            f"DEBUG MODE (Press D to toggle, R to reset DB)",
             f"Distance: {dist:.0f}px | NPC Angle: {self.npc.angle:.1f}°",
             f"Player Angle: {angle_to_player:.1f}° | Diff: {angle_diff:.1f}°",
             f"Vision: Range={vision_range}px, Cone={vision_angle}°",
             f"Can See: {self.npc_perception.last_seen_player_pos is not None} (need dist < {vision_range} AND angle diff < {vision_angle/2:.0f}°)",
             f"InSubcone: {dist <= subcone_range and angle_diff <= subcone_angle} (need dist < {subcone_range} AND angle diff < {subcone_angle}°)",
+            f"RBC: Casos={rbc_stats.get('total_cases', 0)} | Epsilon={rbc_stats.get('epsilon', 0):.3f} | Avg Reward={rbc_stats.get('avg_reward', 0):.1f}",
         ]
         
         y_offset = ARENA_TOP + 10
@@ -1142,6 +1149,43 @@ class Game:
         keys = pygame.key.get_pressed()
         if keys[pygame.K_RETURN]:
             self.state = "menu"
+    
+    def reset_game_and_database(self):
+        """Apaga o banco de dados e reinicia a partida do zero (DEBUG MODE)."""
+        print("[DEBUG] Resetando banco de dados RBC...")
+        
+        # Fecha conexão atual e força liberação do arquivo
+        self.npc_brain.close()
+        del self.npc_brain  # Remove referência
+        
+        # Força garbage collection para liberar arquivo no Windows
+        import gc
+        import time
+        gc.collect()
+        
+        # Aguarda um momento para Windows liberar o arquivo
+        time.sleep(0.15)
+        
+        # Reinicia o banco físico (force_reset apaga o arquivo .db)
+        try:
+            initialize_database(force_reset=True)
+        except PermissionError:
+            print("[DEBUG] Arquivo ainda em uso, tentando novamente...")
+            time.sleep(0.3)
+            gc.collect()
+            try:
+                initialize_database(force_reset=True)
+            except PermissionError as e:
+                print(f"[DEBUG] ERRO: Não foi possível deletar o banco: {e}")
+                print("[DEBUG] Continuando com banco existente...")
+        
+        # Cria novo NPCBrain com banco vazio
+        self.npc_brain = NPCBrain("npc_cases.db")
+        
+        # Reinicia a partida usando método apropriado
+        self.start_new_game()
+        
+        print("[DEBUG] Banco de dados RBC resetado! Partida reiniciada.")
 
     def _draw_rbc_statistics(self):
         """Exibe estatísticas do motor RBC na tela de game over."""

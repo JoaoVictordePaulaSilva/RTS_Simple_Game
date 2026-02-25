@@ -279,7 +279,12 @@ class CaseDatabase:
 
     def close(self) -> None:
         if self.connection:
-            self.connection.close()
+            try:
+                self.connection.commit()  # Garante que todas as transações sejam finalizadas
+                self.connection.close()
+                self.connection = None  # Remove referência
+            except Exception as e:
+                print(f"Erro ao fechar banco de dados: {e}")
 
     def __enter__(self):
         return self

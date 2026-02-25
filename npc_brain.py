@@ -117,36 +117,100 @@ class NPCBrain:
         )
 
     def _generate_fallback_action(self, problem: Problem) -> Solution:
+        """
+        Gera ação de exploração inteligente baseada no estado do problema.
+        Generate intelligent exploration action based on problem state.
+        
+        Essa função é usada para EXPLORAÇÃO no cold start do RBC.
+        """
         import random
 
-        r = random.random()
-
-        # 40% mover aleatoriamente
-        if r < 0.4:
-            return Solution(
-                action="wander",
-                params={
-                    "direction": random.choice([-1, 1]),
-                    "speed": random.uniform(0.3, 0.9)
-                }
-            )
-
-        # 30% girar aleatoriamente
-        if r < 0.7:
-            return Solution(
-                action="random_rotate",
-                params={
-                    "direction": random.choice([-1, 1])
-                }
-            )
-
-        # 30% atirar totalmente desalinhado
-        return Solution(
-            action="fire",
-            params={
-                "angle_adjustment": random.uniform(-60, 60)
-            }
-        )
+        # Se jogador está visível - prioriza ações ofensivas
+        if problem.player_visible:
+            # Distribuição baseada no alinhamento
+            if problem.angle_diff < 10:
+                # Muito bem alinhado - 80% dispara, 20% explora movimento
+                if random.random() < 0.8:
+                    return Solution(action="fire", params={})
+                else:
+                    return Solution(
+                        action="wander",
+                        params={"direction": random.choice([-1, 1]), "speed": 0.6}
+                    )
+            
+            elif problem.angle_diff < 30:
+                # Razoavelmente alinhado - 60% alinha e dispara, 40% outras ações
+                r = random.random()
+                if r < 0.6:
+                    return Solution(action="align_and_fire", params={})
+                elif r < 0.8:
+                    return Solution(action="fire", params={})
+                else:
+                    return Solution(
+                        action="pursue",
+                        params={"speed": random.uniform(0.5, 1.0)}
+                    )
+            
+            elif problem.angle_diff < 90:
+                # Desalinhado - 70% alinha, 30% tenta outras estratégias
+                r = random.random()
+                if r < 0.5:
+                    return Solution(action="align_and_fire", params={})
+                elif r < 0.7:
+                    return Solution(
+                        action="random_rotate",
+                        params={"direction": 1 if problem.angle_diff > 0 else -1}
+                    )
+                else:
+                    return Solution(
+                        action="pursue",
+                        params={"speed": random.uniform(0.6, 0.9)}
+                    )
+            
+            else:
+                # Muito desalinhado - precisa rotacionar bastante
+                return Solution(
+                    action="random_rotate",
+                    params={"direction": random.choice([-1, 1])}
+                )
+        
+        # Se jogador não está visível mas foi visto recentemente
+        elif problem.frames_lost < 120:  # Menos de 2 segundos
+            r = random.random()
+            if r < 0.4:
+                return Solution(action="search", params={})
+            elif r < 0.7:
+                return Solution(
+                    action="random_rotate",
+                    params={"direction": random.choice([-1, 1])}
+                )
+            else:
+                return Solution(
+                    action="wander",
+                    params={"direction": random.choice([-1, 1]), "speed": 0.5}
+                )
+        
+        # Jogador não visto há muito tempo - exploração aleatória balanceada
+        else:
+            r = random.random()
+            
+            if r < 0.35:  # 35% mover
+                return Solution(
+                    action="wander",
+                    params={
+                        "direction": random.choice([-1, 1]),
+                        "speed": random.uniform(0.4, 0.8)
+                    }
+                )
+            elif r < 0.70:  # 35% girar
+                return Solution(
+                    action="random_rotate",
+                    params={"direction": random.choice([-1, 1])}
+                )
+            elif r < 0.85:  # 15% buscar
+                return Solution(action="search", params={})
+            else:  # 15% tentar disparar (exploratório)
+                return Solution(action="fire", params={})
 
     def report_outcome(
         self,
@@ -178,14 +242,56 @@ class NPCBrain:
             outcome_type=outcome_type
         )
 
-        #Cálculo dos pontos para o aprendizado do RBC
-        reward = 0.0 
-
+        # ===== SISTEMA DE REWARD APRIMORADO =====
+        # Reward base começa neutro
+        reward = 0.0
+        
+        # 1. Recompensa por sucesso geral
         if success:
-            reward += 5.0
-
-        reward += damage_dealt * 0.2
-        reward -= damage_taken * 0.3 
+            reward += 10.0
+        
+        # 2. Dano causado é muito valioso (objetivo principal)
+        if damage_dealt > 0:
+            reward += damage_dealt * 2.0  # 2 pontos por dano
+        
+        # 3. Penalidade pesada por receber dano (deve evitar)
+        if damage_taken > 0:
+            reward -= damage_taken * 3.0  # -3 pontos por dano recebido
+        
+        # 4. Recompensas específicas por tipo de resultado
+        if outcome_type == "hit":
+            reward += 15.0  # Bônus grande por acertar
+        elif outcome_type == "miss":
+            reward -= 5.0  # Penalidade por errar
+        elif outcome_type == "evaded":
+            reward += 3.0  # Pequeno bônus por evasão bem-sucedida
+        elif outcome_type == "safe":
+            reward += 1.0  # Pequeno bônus por ficar seguro
+        
+        # 5. Considera distância e alinhamento para ações ofensivas
+        if solution.action in ["fire", "align_and_fire"]:
+            # Recompensa por estar bem posicionado ao atirar
+            if problem.angle_diff < 15:
+                reward += 5.0  # Bem alinhado
+            elif problem.angle_diff < 30:
+                reward += 2.0  # Razoavelmente alinhado
+            
+            # Distância ideal de combate (200-400 pixels)
+            if 200 <= problem.distance <= 400:
+                reward += 3.0
+            elif problem.distance < 100:
+                reward -= 2.0  # Muito perto é perigoso
+        
+        # 6. Penalidade por ações ineficientes
+        if solution.action == "idle":
+            reward -= 3.0  # Desencorajar inatividade
+        
+        # 7. Pequeno bônus por manter jogador visível
+        if problem.player_visible:
+            reward += 2.0
+        
+        # Garante que reward não seja extremamente negativo (para não desencorajar totalmente)
+        reward = max(-20.0, reward)
 
         outcome.reward = reward
 
@@ -207,7 +313,9 @@ class NPCBrain:
 
     def close(self) -> None:
         """Fecha conexões do RBC."""
-        self.rbc_engine.close()
+        if hasattr(self, 'rbc_engine') and self.rbc_engine:
+            self.rbc_engine.close()
+            self.rbc_engine = None
 
     def __enter__(self):
         return self

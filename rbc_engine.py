@@ -58,6 +58,13 @@ class RBCEngine:
         self.last_case_id: Optional[str] = None
         self.last_problem: Optional[Problem] = None
         self.last_solution: Optional[Solution] = None
+        
+        # Epsilon-greedy para exploração vs exploitação
+        self.epsilon = 0.3  # 30% de exploração inicial
+        self.epsilon_min = 0.05  # Mínimo 5% de exploração sempre
+        self.epsilon_decay = 0.995  # Decay gradual
+        
+        self.verbose = False  # Flag para debug logging (mude para True se quiser logs)
 
     def decide_action(
         self,
@@ -66,45 +73,73 @@ class RBCEngine:
         difficulty: str = "Normal"
     ) -> Solution:
         """
-        Decide ação usando RBC. Se não encontrar casos similares, usa fallback.
-        Decide action using RBC. Falls back to default AI if no similar cases found.
+        Decide ação usando RBC com epsilon-greedy.
+        Decide action using RBC with epsilon-greedy exploration.
         
         Args:
             problem: Estado atual do jogo
-            fallback_solution: Solução padrão se nenhum caso similar for encontrado
+            fallback_solution: Solução padrão para exploração
             difficulty: Nível de dificuldade para filtrar casos
             
         Returns:
             Solução/ação a ser tomada
         """
+        import random
+        
+        # Epsilon-greedy: decide entre explorar (fallback) ou exploitar (RBC)
+        explore = random.random() < self.epsilon
+        
         # Recupera casos similares
         similar_cases = self.db.get_similar_cases(
             asdict(problem),
-            threshold=0.6,
-            limit=3,
+            threshold=0.5,  # Threshold mais baixo para aceitar mais casos
+            limit=5,  # Mais casos para considerar
             difficulty=difficulty
         )
 
-        if similar_cases:
+        # Se deve explorar OU não tem casos, usa fallback
+        if explore or not similar_cases:
+            solution = fallback_solution
+            self.last_case_id = None
+            
+            # Debug: log de exploração
+            if self.verbose:
+                if explore and similar_cases:
+                    print(f"[RBC] EXPLORANDO (epsilon={self.epsilon:.3f}) - ignorando {len(similar_cases)} casos")
+                elif not similar_cases:
+                    print(f"[RBC] Sem casos similares - EXPLORANDO por necessidade")
+            
+            # Decay do epsilon após exploração
+            if self.epsilon > self.epsilon_min:
+                self.epsilon *= self.epsilon_decay
+        else:
+            # Exploitação: usa melhor caso similar
             best_score = -9999
             best_case = None
 
             for case in similar_cases:
                 similarity = case.get("similarity", 0)
-                reward = case.get("result_reward", 1.0)
-
-                score = similarity * reward
+                avg_reward = case.get("avg_reward", 0.0)
+                usage_count = case.get("usage_count", 1)
+                
+                # Score considera similaridade, reward médio e confiança (usage_count)
+                # Casos usados mais vezes ganham mais confiança
+                confidence = min(1.0, usage_count / 10.0)  # Máx confiança aos 10 usos
+                score = similarity * avg_reward * (0.7 + 0.3 * confidence)
 
                 if score > best_score:
                     best_score = score
                     best_case = case
+            
+            # Debug: log de exploitação
+            if self.verbose:
+                print(f"[RBC] EXPLOITANDO caso #{best_case['case_id'][:8]} - "
+                      f"sim={best_case.get('similarity', 0):.2f}, "
+                      f"reward={best_case.get('avg_reward', 0):.1f}, "
+                      f"usos={best_case.get('usage_count', 0)}")
 
             solution = self._adapt_solution(best_case, problem)
             self.last_case_id = best_case["case_id"]
-        else:
-            # Fallback: Usa IA básica padrão
-            solution = fallback_solution
-            self.last_case_id = None
 
         self.last_problem = problem
         self.last_solution = solution
@@ -125,15 +160,13 @@ class RBCEngine:
         action = case["solution_action"]
         params = json.loads(case["solution_params"]) if case["solution_params"] else {}
 
-        # Adaptações baseadas no novo problema
+        # Remove angle_adjustment de ações "fire" para garantir que sempre atira na direção visual
+        # Remove angle_adjustment from "fire" actions to ensure it always fires in visual direction
         if action == "fire" and "angle_adjustment" in params:
-            # Ajusta ângulo de disparo baseado na diferença angular
-            original_angle_diff = case["problem_angle_diff"]
-            new_angle_diff = new_problem.angle_diff
-            angle_delta = new_angle_diff - original_angle_diff
-            params["angle_adjustment"] = params["angle_adjustment"] + (angle_delta * 0.3)
+            del params["angle_adjustment"]
 
-        elif "move" in action and "speed" in params:
+        # Adaptações baseadas no novo problema
+        if "move" in action and "speed" in params:
             # Ajusta velocidade de movimento baseado na distância
             original_distance = case["problem_distance"]
             new_distance = new_problem.distance
@@ -193,11 +226,20 @@ class RBCEngine:
         }
 
         self.db.insert_case(new_case)
+        
+        # Debug: log de aprendizado
+        if self.verbose:
+            print(f"[RBC] NOVO CASO APRENDIDO: {solution.action} "
+                  f"(reward={outcome.reward:.1f}, sucesso={outcome.success})")
 
     def get_statistics(self) -> Dict:
         """Retorna estatísticas do motor RBC."""
-        return self.db.get_statistics()
+        stats = self.db.get_statistics()
+        stats["epsilon"] = self.epsilon  # Adiciona taxa de exploração atual
+        return stats
 
     def close(self) -> None:
         """Fecha conexão com banco de dados."""
-        self.db.close()
+        if hasattr(self, 'db') and self.db:
+            self.db.close()
+            self.db = None
