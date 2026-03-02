@@ -58,13 +58,42 @@ class RBCEngine:
         self.last_case_id: Optional[str] = None
         self.last_problem: Optional[Problem] = None
         self.last_solution: Optional[Solution] = None
+       
         
         # Epsilon-greedy para exploração vs exploitação
-        self.epsilon = 0.3  # 30% de exploração inicial
+        self.epsilon = 0.6 # 60% de exploração inicial
         self.epsilon_min = 0.05  # Mínimo 5% de exploração sempre
-        self.epsilon_decay = 0.995  # Decay gradual
+        self.epsilon_decay = 0.85  # Decay gradual
         
-        self.verbose = False  # Flag para debug logging (mude para True se quiser logs)
+        self.verbose = True #Flag para debug
+
+
+        #modo do RBC (INIT - COLD START OU RBC)
+        self.mode = 'INIT'
+        self.episode_count = 0
+
+    #Método - Aleatoriedade - Teste
+    def _random_action(self, problem: Problem) -> Solution:
+        import random
+
+
+        r = random.random()
+        if r < 0.25:
+            return Solution("wander", {
+                "direction": random.choice([-1, 1]),
+                "speed": random.uniform(0.3, 1.0)
+            })
+
+        elif r < 0.5:
+            return Solution("random_rotate", {
+                "direction": random.choice([-1, 1])
+            })
+
+        elif r < 0.75:
+            return Solution("fire", {})
+
+        else:
+            return Solution("search", {})
 
     def decide_action(
         self,
@@ -84,36 +113,48 @@ class RBCEngine:
         Returns:
             Solução/ação a ser tomada
         """
+
+
         import random
-        
+
+        #Aleatoriedade (Cold start - Como um carro, o óleo precisa esquentar para o RBC aprender)
+        if self.episode_count < 5:
+            self.mode = "COLD_START"
+            if self.verbose:
+                print("[RBC] COLD START - comportamento aleatório")
+            solution = self._random_action(problem)
+            self.last_case_id = None
+            self.last_problem = problem
+            self.last_solution = solution
+            return solution
+
+
         # Epsilon-greedy: decide entre explorar (fallback) ou exploitar (RBC)
         explore = random.random() < self.epsilon
-        
+
         # Recupera casos similares
         similar_cases = self.db.get_similar_cases(
             asdict(problem),
-            threshold=0.5,  # Threshold mais baixo para aceitar mais casos
-            limit=5,  # Mais casos para considerar
+            threshold=0.5,
+            limit=5,
             difficulty=difficulty
         )
 
         # Se deve explorar OU não tem casos, usa fallback
         if explore or not similar_cases:
+            self.mode = "RANDOM"
             solution = fallback_solution
             self.last_case_id = None
             
-            # Debug: log de exploração
             if self.verbose:
                 if explore and similar_cases:
-                    print(f"[RBC] EXPLORANDO (epsilon={self.epsilon:.3f}) - ignorando {len(similar_cases)} casos")
+                    print(f"[RBC] EXPLORANDO (epsilon={self.epsilon:.3f})")
                 elif not similar_cases:
-                    print(f"[RBC] Sem casos similares - EXPLORANDO por necessidade")
-            
-            # Decay do epsilon após exploração
-            if self.epsilon > self.epsilon_min:
-                self.epsilon *= self.epsilon_decay
+                    print("[RBC] Sem casos similares - EXPLORANDO")
+
         else:
-            # Exploitação: usa melhor caso similar
+            self.mode = "RBC"
+
             best_score = -9999
             best_case = None
 
@@ -122,21 +163,15 @@ class RBCEngine:
                 avg_reward = case.get("avg_reward", 0.0)
                 usage_count = case.get("usage_count", 1)
                 
-                # Score considera similaridade, reward médio e confiança (usage_count)
-                # Casos usados mais vezes ganham mais confiança
-                confidence = min(1.0, usage_count / 10.0)  # Máx confiança aos 10 usos
+                confidence = min(1.0, usage_count / 10.0)
                 score = similarity * avg_reward * (0.7 + 0.3 * confidence)
 
                 if score > best_score:
                     best_score = score
                     best_case = case
-            
-            # Debug: log de exploitação
+
             if self.verbose:
-                print(f"[RBC] EXPLOITANDO caso #{best_case['case_id'][:8]} - "
-                      f"sim={best_case.get('similarity', 0):.2f}, "
-                      f"reward={best_case.get('avg_reward', 0):.1f}, "
-                      f"usos={best_case.get('usage_count', 0)}")
+                print(f"[RBC] EXPLOITANDO caso #{best_case['case_id'][:8]}")
 
             solution = self._adapt_solution(best_case, problem)
             self.last_case_id = best_case["case_id"]
@@ -144,6 +179,17 @@ class RBCEngine:
         self.last_problem = problem
         self.last_solution = solution
         return solution
+    
+    def end_episode(self):
+        self.episode_count += 1
+
+        if self.epsilon > self.epsilon_min:
+            self.epsilon *= self.epsilon_decay
+            self.epsilon = max(self.epsilon, self.epsilon_min)
+
+        if self.verbose:
+            print(f"[RBC] Episódio {self.episode_count} | Novo epsilon: {self.epsilon:.3f}")
+
 
     def _adapt_solution(self, case: Dict, new_problem: Problem) -> Solution:
         """
@@ -233,9 +279,10 @@ class RBCEngine:
                   f"(reward={outcome.reward:.1f}, sucesso={outcome.success})")
 
     def get_statistics(self) -> Dict:
-        """Retorna estatísticas do motor RBC."""
         stats = self.db.get_statistics()
-        stats["epsilon"] = self.epsilon  # Adiciona taxa de exploração atual
+        stats["epsilon"] = self.epsilon
+        stats["mode"] = self.mode
+        stats["episode"] = self.episode_count
         return stats
 
     def close(self) -> None:

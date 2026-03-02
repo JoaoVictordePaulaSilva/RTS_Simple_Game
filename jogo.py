@@ -506,6 +506,7 @@ class Game:
 
             # Verifica condições de fim de jogo / check end conditions
             if self.player.health <= 0 or self.npc.health <= 0:
+                self.npc_brain.rbc_engine.end_episode()
                 self.state = "gameover"
 
     def _collide_proj_tank(self, p, tank):
@@ -1188,41 +1189,56 @@ class Game:
         print("[DEBUG] Banco de dados RBC resetado! Partida reiniciada.")
 
     def _draw_rbc_statistics(self):
+
         """Exibe estatísticas do motor RBC na tela de game over."""
+    
         stats = self.npc_brain.get_statistics()
         
         y_start = 320
         box_x = SCREEN_WIDTH // 2 - 150
         box_w = 300
-        box_h = 140
-        
-        # Fundo da caixa
-        pygame.draw.rect(self.screen, (20, 20, 30), (box_x, y_start, box_w, box_h), border_radius=6)
-        pygame.draw.rect(self.screen, (100, 120, 100), (box_x, y_start, box_w, box_h), 2, border_radius=6)
-        
-        # Título
-        title_txt = self.font.render("RBC Statistics", True, (100, 200, 100))
-        self.screen.blit(title_txt, (box_x + 10, y_start + 8))
-        
+        box_h = 160  
         # Dados
         y = y_start + 40
-        
-        total_txt = self.small_font.render(f"Total Cases: {stats['total_cases']}", True, (200, 200, 200))
+
+        total_txt = self.small_font.render(
+            f"Total Cases: {stats['total_cases']}",
+            True,
+            (200, 200, 200)
+        )
         self.screen.blit(total_txt, (box_x + 15, y))
         y += 25
-        
-        seed_txt = self.small_font.render(
-    f"Cases: {stats['total_cases']} | Avg Reward: {stats['avg_reward']:.2f}",
-    True,
-    (150, 150, 150)
-)
-        self.screen.blit(seed_txt, (box_x + 15, y))
+
+        mode_txt = self.small_font.render(
+            f"Mode: {stats.get('mode', 'N/A')} | Episode: {stats.get('episode', 0)}",
+            True,
+            (180, 180, 255)
+        )
+        self.screen.blit(mode_txt, (box_x + 15, y))
         y += 25
-        
-        success_txt = self.small_font.render(f"Avg Success: {stats['avg_success_rate']:.1%}", True, (150, 200, 150))
+
+        epsilon_txt = self.small_font.render(
+            f"Epsilon: {stats.get('epsilon', 0):.3f}",
+            True,
+            (200, 180, 120)
+        )
+        self.screen.blit(epsilon_txt, (box_x + 15, y))
+        y += 25
+
+        reward_txt = self.small_font.render(
+            f"Avg Reward: {stats['avg_reward']:.2f}",
+            True,
+            (150, 150, 150)
+        )
+        self.screen.blit(reward_txt, (box_x + 15, y))
+        y += 25
+
+        success_txt = self.small_font.render(
+            f"Avg Success: {stats['avg_success_rate']:.1%}",
+            True,
+            (150, 200, 150)
+        )
         self.screen.blit(success_txt, (box_x + 15, y))
-
-
 
 
 if __name__ == "__main__":
