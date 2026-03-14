@@ -55,6 +55,8 @@ class RBCEngine:
             db_path: Caminho para banco de dados SQLite
         """
         self.db = CaseDatabase(db_path)
+
+        self.player_id = "unknown" 
         self.last_case_id: Optional[str] = None
         self.last_problem: Optional[Problem] = None
         self.last_solution: Optional[Solution] = None
@@ -71,6 +73,13 @@ class RBCEngine:
         #modo do RBC (INIT - COLD START OU RBC)
         self.mode = 'INIT'
         self.episode_count = 0
+
+
+
+
+    #Método para pegar nome jogador 
+    def set_player(self, player_id: str):
+        self.player_id = player_id
 
     #Método - Aleatoriedade - Teste
     def _random_action(self, problem: Problem) -> Solution:
@@ -244,6 +253,7 @@ class RBCEngine:
 
         # 🔥 Caso novo
         new_case = {
+            "player_id": self.player_id,
             "problem_distance": problem.distance,
             "problem_angle_diff": problem.angle_diff,
             "problem_npc_health": problem.npc_health,

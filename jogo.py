@@ -150,9 +150,20 @@ class Tank:
         rect = rotated.get_rect(center=(self.x, self.y))
         surf.blit(rotated, rect.topleft)
 
+        # Nome acima do tanque // Tank Name
+        font = pygame.font.Font(None, 22)
+
+        name_surface = font.render(self.name, True, (255, 255, 255))
+
+        name_rect = name_surface.get_rect(
+            center=(self.x, self.y - self.height // 2 - 12)
+        )
+
+        surf.blit(name_surface, name_rect)
+
 
 class Projectile:
-    def __init__(self, x, y, angle, owner, speed=420, damage=25):
+    def __init__(self, x, y, angle, owner, speed=420, damage=25, color=None):
         self.x = x
         self.y = y
         self.angle = angle
@@ -161,6 +172,7 @@ class Projectile:
         self.damage = damage
         self.radius = 6
         self.is_alive = True
+        self.color = color if color else owner.color
 
     def update(self, dt):
         # Atualiza posição / Update position
@@ -174,7 +186,7 @@ class Projectile:
 
     def draw(self, surf):
         # Desenha projetil como círculo vermelho / Draw projectile as red circle
-        pygame.draw.circle(surf, (200, 60, 60), (int(self.x), int(self.y)), self.radius)
+        pygame.draw.circle(surf, self.color, (int(self.x), int(self.y)), self.radius)
 
 
 class NPCPerception:
@@ -315,8 +327,10 @@ class Game:
         # Idioma / Language
         self.language = "EN"  # Default: English
         
-        # states: menu, options, playing, gameover
+        # states: menu, options, playing, gameover, nome do jogador
         self.state = "menu"
+        self.player_name = ""
+        self.name_input_active = False
         self.running = True
 
         self.setup_menu()
@@ -347,7 +361,8 @@ class Game:
         start_y = SCREEN_HEIGHT // 2 - (btn_h + gap)
 
         def start_game():
-            self.start_new_game()
+            self.state = "name_input"
+            self.player_name = ""
 
         def open_options():
             self.state = "options"
@@ -364,7 +379,7 @@ class Game:
     def reset_game(self):
         # Tanques no lado esquerdo e direito
         # Tanks at left and right, constrained to Y movement
-        self.player = Tank(140, SCREEN_HEIGHT // 2, (40, 120, 200), is_player=True, name=STRINGS[self.language]["player"])
+        self.player = Tank(140, SCREEN_HEIGHT // 2, (40, 120, 200), is_player=True, name=self.player_name if self.player_name else STRINGS[self.language]["player"])
         self.npc = Tank(SCREEN_WIDTH - 140, SCREEN_HEIGHT // 2, (200, 100, 60), is_player=False, name=STRINGS[self.language]["enemy"])
         self.npc_perception = NPCPerception(self.npc)
         self.projectiles = []
@@ -390,6 +405,7 @@ class Game:
         # Inicializa sessão RBC
         self.current_session_id = str(uuid.uuid4())
         self.npc_brain.set_session(self.current_session_id)
+        self.npc_brain.set_player(self.player_name)
         self.action_frame_counter = 0
 
         self.state = "playing"
@@ -411,6 +427,16 @@ class Game:
             if self.state == "menu":
                 for b in self.buttons:
                     b.handle_event(ev)
+            elif self.state == "name_input":
+                if ev.type == pygame.KEYDOWN:
+                    if ev.key == pygame.K_RETURN:
+                        if self.player_name.strip() != "":
+                            self.start_new_game()
+                    elif ev.key == pygame.K_BACKSPACE:
+                        self.player_name = self.player_name[:-1]
+                    else:
+                        if len(self.player_name) < 12:
+                            self.player_name += ev.unicode
             elif self.state == "options":
                 if ev.type == pygame.KEYDOWN and ev.key == pygame.K_ESCAPE:
                     self.state = "menu"
@@ -732,6 +758,25 @@ class Game:
             pass
 
 
+
+    def _draw_name_input(self):
+        self.screen.fill((20,20,30))
+
+        title = self.font.render("Digite seu nome:", True, (230,230,230))
+        self.screen.blit(title, (SCREEN_WIDTH//2 - 100, 200))
+
+        box = pygame.Rect(SCREEN_WIDTH//2 - 150, 260, 300, 50)
+        pygame.draw.rect(self.screen, (40,40,60), box)
+        pygame.draw.rect(self.screen, (120,120,200), box, 2)
+
+        name_surface = self.font.render(self.player_name, True, (255,255,255))
+        self.screen.blit(name_surface, (box.x + 10, box.y + 10))
+
+        hint = self.small_font.render("ENTER para confirmar", True, (180,180,180))
+        self.screen.blit(hint, (SCREEN_WIDTH//2 - 90, 330))
+
+
+
     def _approach_angle(self, src, trg, step):
         # Move src toward trg by at most step (degrees), handling wrap-around
         # Rotação suave considerando wrap-around / Smooth rotation handling wrap-around
@@ -744,6 +789,8 @@ class Game:
     def draw(self):
         if self.state == "menu":
             self._draw_menu()
+        elif self.state == "name_input":
+            self._draw_name_input()
         elif self.state == "options":
             self._draw_options()
         elif self.state == "playing":
@@ -1128,12 +1175,28 @@ class Game:
 
     def _draw_gameover(self):
         # Desenha tela de fim de jogo / Draw game over screen
-        self.screen.fill((10, 10, 10))
+
+        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
+        overlay.set_alpha(180)
+        overlay.fill((0, 0, 0))
+        self.screen.blit(overlay, (0, 0))
+
+
         winner = STRINGS[self.language]["draw"]
+
         if self.player.health > self.npc.health:
-            winner = STRINGS[self.language]["player_wins"]
+            if self.language == "EN":
+                winner = f"{self.player_name} wins"
+            else:
+                winner = f"{self.player_name} venceu"
+
         elif self.npc.health > self.player.health:
-            winner = STRINGS[self.language]["enemy_wins"]
+            if self.language == "EN":
+                winner = "NPC wins"
+            else:
+                winner = "NPC venceu"
+
+
 
         title = pygame.font.Font(None, 64).render(STRINGS[self.language]["game_over"], True, (240, 240, 240))
         self.screen.blit(title, title.get_rect(center=(SCREEN_WIDTH // 2, 140)))
@@ -1198,6 +1261,10 @@ class Game:
         box_x = SCREEN_WIDTH // 2 - 150
         box_w = 300
         box_h = 160  
+
+        pygame.draw.rect(self.screen, (20,20,30), (box_x, y_start, box_w, box_h), border_radius=6)
+        pygame.draw.rect(self.screen, (100,120,100), (box_x, y_start, box_w, box_h), 2, border_radius=6)
+
         # Dados
         y = y_start + 40
 

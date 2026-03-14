@@ -29,6 +29,7 @@ class CaseDatabase:
         CREATE TABLE IF NOT EXISTS rbc_cases (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             case_id TEXT UNIQUE NOT NULL,
+            player_id TEXT, 
 
             -- PROBLEM
             problem_distance REAL NOT NULL,
@@ -94,6 +95,7 @@ class CaseDatabase:
         cursor.execute("""
             INSERT INTO rbc_cases (
                 case_id,
+                player_id,
                 problem_distance, problem_angle_diff,
                 problem_npc_health, problem_player_health, problem_player_visible,
                 problem_frames_lost,
@@ -103,9 +105,10 @@ class CaseDatabase:
                 usage_count, success_count, success_rate,
                 total_reward, avg_reward
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             case_id,
+            case_data.get("player_id", "unknown"),
             case_data.get("problem_distance", 0),
             case_data.get("problem_angle_diff", 0),
             case_data.get("problem_npc_health", 100),

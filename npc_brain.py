@@ -85,6 +85,10 @@ class NPCBrain:
         self.frame_counter += 1
 
         return solution
+    
+    def set_player(self, player_id: str):
+        self.rbc_engine.set_player(player_id)
+    
 
     def _encode_problem(
         self,
