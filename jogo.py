@@ -30,7 +30,7 @@ ARENA_RIGHT = 820
 # Language strings / Dicionário de idiomas
 STRINGS = {
     "PT": {
-        "title": "RTS Tanks - Demo",
+        "title": "joguinho",
         "start_game": "Iniciar Jogo",
         "options": "Opções",
         "language": "Idioma",
@@ -55,9 +55,20 @@ STRINGS = {
         "draw": "Empate",
         "press_enter": "Pressione ENTER para voltar",
         "waiting_events": "Aguardando eventos...",
+        "login_title": "Entrar no jogo",
+        "login_subtitle": "Defina seu nome de jogador para continuar",
+        "player_name_label": "Nome do jogador",
+        "player_name_placeholder": "joguinho",
+        "login_confirm": "ENTER para confirmar",
+        "login_back": "ESC para voltar",
+        "change_user": "Trocar usuário",
+        "logged_as": "Logado como",
+        "difficulty_in_use": "Dificuldade em uso",
+        "difficulty_locked": "Normal (fixa)",
+        "back_menu": "Voltar ao menu",
     },
     "EN": {
-        "title": "RTS Tanks - Demo",
+        "title": "joguinho",
         "start_game": "Start Game",
         "options": "Options",
         "language": "Language",
@@ -82,6 +93,17 @@ STRINGS = {
         "draw": "Draw",
         "press_enter": "Press Enter to return to menu",
         "waiting_events": "Waiting for events...",
+        "login_title": "Sign in",
+        "login_subtitle": "Set your player name to continue",
+        "player_name_label": "Player name",
+        "player_name_placeholder": "joguinho",
+        "login_confirm": "Press ENTER to confirm",
+        "login_back": "Press ESC to return",
+        "change_user": "Change user",
+        "logged_as": "Logged as",
+        "difficulty_in_use": "Difficulty in use",
+        "difficulty_locked": "Normal (locked)",
+        "back_menu": "Back to menu",
     }
 }
 
@@ -327,8 +349,8 @@ class Game:
         # Idioma / Language
         self.language = "EN"  # Default: English
         
-        # states: menu, options, playing, gameover, nome do jogador
-        self.state = "menu"
+        # states: menu, options, playing, gameover, name_input
+        self.state = "name_input"
         self.player_name = ""
         self.name_input_active = False
         self.running = True
@@ -361,8 +383,10 @@ class Game:
         start_y = SCREEN_HEIGHT // 2 - (btn_h + gap)
 
         def start_game():
-            self.state = "name_input"
-            self.player_name = ""
+            if self.player_name.strip():
+                self.start_new_game()
+            else:
+                self.state = "name_input"
 
         def open_options():
             self.state = "options"
@@ -388,7 +412,9 @@ class Game:
 
     def start_new_game(self):
         self.reset_game()
-        diff = self.options.get("difficulty", "Normal")
+        # Dificuldade travada em Normal para simplificar UX.
+        diff = "Normal"
+        self.options["difficulty"] = diff
         if diff == "Easy":
             self.ai_shot_interval = 1.6
             self.npc.health = 80
@@ -430,12 +456,14 @@ class Game:
             elif self.state == "name_input":
                 if ev.type == pygame.KEYDOWN:
                     if ev.key == pygame.K_RETURN:
+                        self._commit_login(go_to_menu=True)
+                    elif ev.key == pygame.K_ESCAPE:
                         if self.player_name.strip() != "":
-                            self.start_new_game()
+                            self.state = "menu"
                     elif ev.key == pygame.K_BACKSPACE:
                         self.player_name = self.player_name[:-1]
                     else:
-                        if len(self.player_name) < 12:
+                        if len(self.player_name) < 12 and ev.unicode.isprintable() and ev.unicode:
                             self.player_name += ev.unicode
             elif self.state == "options":
                 if ev.type == pygame.KEYDOWN and ev.key == pygame.K_ESCAPE:
@@ -465,6 +493,16 @@ class Game:
         self.language = lang
         self.setup_menu()  # Reconstrói botões com novo idioma / Rebuild buttons with new language
         self.reset_game()  # Reconstrói jogo com novo idioma / Rebuild game with new language
+
+    def _commit_login(self, go_to_menu=True):
+        # Usa placeholder como fallback se usuário confirmar vazio.
+        name = self.player_name.strip()
+        if not name:
+            name = STRINGS[self.language].get("player_name_placeholder", "joguinho")
+        self.player_name = name[:12]
+        self.reset_game()
+        if go_to_menu:
+            self.state = "menu"
 
     def update(self, dt):
         if self.state == "playing":
@@ -760,20 +798,49 @@ class Game:
 
 
     def _draw_name_input(self):
-        self.screen.fill((20,20,30))
+        self.screen.fill((20, 26, 36))
 
-        title = self.font.render("Digite seu nome:", True, (230,230,230))
-        self.screen.blit(title, (SCREEN_WIDTH//2 - 100, 200))
+        # Fundo com blocos suaves para combinar com a identidade do jogo.
+        pygame.draw.circle(self.screen, (35, 70, 70), (140, 90), 120)
+        pygame.draw.circle(self.screen, (60, 50, 85), (SCREEN_WIDTH - 100, 120), 150)
 
-        box = pygame.Rect(SCREEN_WIDTH//2 - 150, 260, 300, 50)
-        pygame.draw.rect(self.screen, (40,40,60), box)
-        pygame.draw.rect(self.screen, (120,120,200), box, 2)
+        panel = pygame.Rect(SCREEN_WIDTH // 2 - 230, 150, 460, 300)
+        pygame.draw.rect(self.screen, (25, 30, 42), panel, border_radius=10)
+        pygame.draw.rect(self.screen, (70, 95, 120), panel, 2, border_radius=10)
 
-        name_surface = self.font.render(self.player_name, True, (255,255,255))
-        self.screen.blit(name_surface, (box.x + 10, box.y + 10))
+        title = self.section_title_font.render(STRINGS[self.language]["login_title"], True, (235, 240, 245))
+        self.screen.blit(title, title.get_rect(center=(SCREEN_WIDTH // 2, 205)))
 
-        hint = self.small_font.render("ENTER para confirmar", True, (180,180,180))
-        self.screen.blit(hint, (SCREEN_WIDTH//2 - 90, 330))
+        subtitle = self.small_font.render(STRINGS[self.language]["login_subtitle"], True, (180, 195, 210))
+        self.screen.blit(subtitle, subtitle.get_rect(center=(SCREEN_WIDTH // 2, 235)))
+
+        name_label = self.font.render(STRINGS[self.language]["player_name_label"], True, (215, 220, 230))
+        self.screen.blit(name_label, (panel.x + 34, panel.y + 108))
+
+        box = pygame.Rect(panel.x + 30, panel.y + 140, panel.width - 60, 56)
+        pygame.draw.rect(self.screen, (40, 46, 62), box, border_radius=8)
+        pygame.draw.rect(self.screen, (110, 135, 165), box, 2, border_radius=8)
+
+        display_name = self.player_name
+        color = (245, 245, 245)
+        if not display_name:
+            display_name = STRINGS[self.language]["player_name_placeholder"]
+            color = (130, 145, 165)
+
+        name_surface = self.font.render(display_name, True, color)
+        self.screen.blit(name_surface, (box.x + 12, box.y + 14))
+
+        # Cursor piscante para reforçar que é campo de entrada.
+        if pygame.time.get_ticks() % 1000 < 500 and len(self.player_name) < 12:
+            caret_x = box.x + 14 + name_surface.get_width() if self.player_name else box.x + 14
+            pygame.draw.line(self.screen, (220, 225, 235), (caret_x, box.y + 12), (caret_x, box.y + 42), 2)
+
+        hint = self.small_font.render(STRINGS[self.language]["login_confirm"], True, (200, 210, 220))
+        self.screen.blit(hint, hint.get_rect(center=(SCREEN_WIDTH // 2, panel.y + 236)))
+
+        if self.player_name.strip():
+            back_hint = self.small_font.render(STRINGS[self.language]["login_back"], True, (150, 160, 175))
+            self.screen.blit(back_hint, back_hint.get_rect(center=(SCREEN_WIDTH // 2, panel.y + 262)))
 
 
 
@@ -803,8 +870,13 @@ class Game:
     def _draw_menu(self):
         # Desenha menu principal / Draw main menu
         self.screen.fill((30, 40, 50))
-        title = pygame.font.Font(None, 64).render(STRINGS[self.language]["title"], True, (230, 230, 230))
+        title = self.menu_title_font.render(STRINGS[self.language]["title"], True, (230, 230, 230))
         self.screen.blit(title, title.get_rect(center=(SCREEN_WIDTH // 2, 140)))
+
+        logged_as = f"{STRINGS[self.language]['logged_as']}: {self.player_name if self.player_name else STRINGS[self.language]['player_name_placeholder']}"
+        logged_txt = self.small_font.render(logged_as, True, (180, 195, 210))
+        self.screen.blit(logged_txt, logged_txt.get_rect(center=(SCREEN_WIDTH // 2, 185)))
+
         mouse_pos = pygame.mouse.get_pos()
         for b in self.buttons:
             b.draw(self.screen, mouse_pos)
@@ -858,32 +930,35 @@ class Game:
             elif lang_en_rect.collidepoint(mouse_pos):
                 self._set_language("EN")
 
-        # Opções de dificuldade / Difficulty options
+        # Conta ativa e troca de usuário / Active account and login switch
         y = 240
-        diff_label = self.font.render(STRINGS[self.language]["difficulty"] + ": " + self.options.get("difficulty", "Normal"), True, (210, 210, 210))
-        self.screen.blit(diff_label, (60, y))
+        account_bg = pygame.Rect(40, y - 10, SCREEN_WIDTH - 80, 90)
+        pygame.draw.rect(self.screen, (35, 40, 50), account_bg, border_radius=6)
+        pygame.draw.rect(self.screen, (80, 100, 120), account_bg, 1, border_radius=6)
 
-        diffs = ["Easy", "Normal", "Hard"]
-        diffs_display = [STRINGS[self.language]["easy"], STRINGS[self.language]["normal"], STRINGS[self.language]["hard"]]
-        y += 35
-        btn_w = 120
-        btn_h = 40
-        btn_gap = 20
-        total_w = 3 * btn_w + 2 * btn_gap
-        start_x = (SCREEN_WIDTH - total_w) // 2
+        current_user = self.player_name if self.player_name else STRINGS[self.language]["player_name_placeholder"]
+        user_label = self.font.render(f"{STRINGS[self.language]['logged_as']}: {current_user}", True, (210, 210, 210))
+        self.screen.blit(user_label, (60, y + 8))
 
-        for i, (d, d_display) in enumerate(zip(diffs, diffs_display)):
-            color = (100, 200, 100) if self.options.get("difficulty") == d else (150, 150, 150)
-            txt = self.font.render(d_display, True, (20, 20, 20))
-            rect = pygame.Rect(start_x + i * (btn_w + btn_gap), y, btn_w, btn_h)
-            pygame.draw.rect(self.screen, color, rect, border_radius=6)
-            self.screen.blit(txt, txt.get_rect(center=rect.center))
-            # clickable
-            if pygame.mouse.get_pressed()[0] and rect.collidepoint(pygame.mouse.get_pos()):
-                self.options["difficulty"] = d
+        login_btn_rect = pygame.Rect(SCREEN_WIDTH - 240, y + 32, 160, 40)
+        login_hover = login_btn_rect.collidepoint(pygame.mouse.get_pos())
+        login_color = (120, 180, 120) if login_hover else (100, 160, 100)
+        pygame.draw.rect(self.screen, login_color, login_btn_rect, border_radius=6)
+        login_txt = self.small_font.render(STRINGS[self.language]["change_user"], True, (20, 20, 20))
+        self.screen.blit(login_txt, login_txt.get_rect(center=login_btn_rect.center))
+
+        if pygame.mouse.get_pressed()[0] and login_btn_rect.collidepoint(pygame.mouse.get_pos()):
+            self.state = "name_input"
+
+        # Dificuldade em uso (somente leitura)
+        y = 350
+        diff_title = self.font.render(STRINGS[self.language]["difficulty_in_use"], True, (210, 210, 210))
+        self.screen.blit(diff_title, (60, y))
+        diff_value = self.small_font.render(STRINGS[self.language]["difficulty_locked"], True, (160, 180, 205))
+        self.screen.blit(diff_value, (60, y + 28))
 
         # Controle de velocidade de projétil / Projectile speed
-        y = 370
+        y = 420
         speed_label = self.font.render(STRINGS[self.language]["projectile_speed"], True, (210, 210, 210))
         self.screen.blit(speed_label, (60, y))
 
@@ -904,6 +979,16 @@ class Game:
 
         info = self.font.render(STRINGS[self.language]["esc_menu"], True, (150, 150, 150))
         self.screen.blit(info, (60, SCREEN_HEIGHT - 60))
+
+        back_btn_rect = pygame.Rect(SCREEN_WIDTH - 260, SCREEN_HEIGHT - 72, 210, 44)
+        back_hover = back_btn_rect.collidepoint(pygame.mouse.get_pos())
+        back_color = (170, 170, 170) if back_hover else (145, 145, 145)
+        pygame.draw.rect(self.screen, back_color, back_btn_rect, border_radius=6)
+        back_txt = self.small_font.render(STRINGS[self.language]["back_menu"], True, (20, 20, 20))
+        self.screen.blit(back_txt, back_txt.get_rect(center=back_btn_rect.center))
+
+        if pygame.mouse.get_pressed()[0] and back_btn_rect.collidepoint(pygame.mouse.get_pos()):
+            self.state = "menu"
 
     def _draw_game(self):
             # Desenha o jogo / Draw the game
