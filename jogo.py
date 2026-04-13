@@ -9,6 +9,7 @@ from npc_brain import NPCBrain
 from rbc_engine import Solution
 from db_init import initialize_database
 from npc_face import NPCFace
+from rbc_monitor import RBCMonitorWindow
 
 # Simples demo RTS com dois tanques (jogador + NPC)
 # Simple professional-but-small RTS-like demo with two tanks (player + NPC)
@@ -53,6 +54,8 @@ STRINGS = {
         "player_wins": "Jogador Vence",
         "enemy_wins": "Inimigo Vence",
         "draw": "Empate",
+        "you_win": "Voce venceu",
+        "you_lose": "Voce perdeu",
         "press_enter": "Pressione ENTER para voltar",
         "waiting_events": "Aguardando eventos...",
         "login_title": "Entrar no jogo",
@@ -91,6 +94,8 @@ STRINGS = {
         "player_wins": "Player Wins",
         "enemy_wins": "Enemy Wins",
         "draw": "Draw",
+        "you_win": "You won",
+        "you_lose": "You lost",
         "press_enter": "Press Enter to return to menu",
         "waiting_events": "Waiting for events...",
         "login_title": "Sign in",
@@ -374,6 +379,14 @@ class Game:
         self.debug_mode = False  # Toggle com 'D'
         self.frame_counter = 0  # Para logging periódico
 
+        # Janela auxiliar para monitorar o RBC em tempo real
+        self.rbc_monitor = RBCMonitorWindow()
+        self.rbc_monitor.start()
+        self._monitor_update_timer = 0.0
+        self.match_result_text = ""
+        self.match_conclusion_sent = False
+        self._decision_counter = 0
+
     def setup_menu(self):
         center_x = SCREEN_WIDTH // 2
         self.buttons = []
@@ -433,6 +446,10 @@ class Game:
         self.npc_brain.set_session(self.current_session_id)
         self.npc_brain.set_player(self.player_name)
         self.action_frame_counter = 0
+        self.match_result_text = ""
+        self.match_conclusion_sent = False
+        self._monitor_update_timer = 0.0
+        self._decision_counter = 0
 
         self.state = "playing"
 
@@ -443,6 +460,7 @@ class Game:
             self.update(dt)
             self.draw()
 
+        self.rbc_monitor.close()
         pygame.quit()
         sys.exit()
 
@@ -507,6 +525,7 @@ class Game:
     def update(self, dt):
         if self.state == "playing":
             self.frame_counter += 1
+            self._monitor_update_timer += dt
             
             keys = pygame.key.get_pressed()
             # Movimento do jogador: apenas eixo Y / Player movement: only Y axis
@@ -571,7 +590,109 @@ class Game:
             # Verifica condições de fim de jogo / check end conditions
             if self.player.health <= 0 or self.npc.health <= 0:
                 self.npc_brain.rbc_engine.end_episode()
+                self.match_result_text = self._build_match_result_text()
                 self.state = "gameover"
+
+            # Atualiza monitor RBC em tempo real sem sobrecarregar a UI auxiliar
+            if self._monitor_update_timer >= 0.2:
+                self._monitor_update_timer = 0.0
+                self._update_rbc_monitor(in_game=True)
+        elif self.state == "gameover":
+            if not self.match_conclusion_sent:
+                self._update_rbc_monitor(in_game=False)
+                self.rbc_monitor.show_match_conclusion({
+                    "lang": self.language,
+                    "conclusion": self.match_result_text or self._build_match_result_text(),
+                })
+                self.rbc_monitor.push_decision(
+                    f"MATCH_END: {self.match_result_text or self._build_match_result_text()}"
+                )
+                self.match_conclusion_sent = True
+
+        else:
+            # Mantem janela auxiliar sincronizada fora da partida
+            self._monitor_update_timer += dt
+            if self._monitor_update_timer >= 0.5:
+                self._monitor_update_timer = 0.0
+                self._update_rbc_monitor(in_game=False)
+
+    def _update_rbc_monitor(self, in_game: bool) -> None:
+        if not self.rbc_monitor.is_enabled():
+            return
+        self.rbc_monitor.update_live({
+            "lang": self.language,
+            "in_game": in_game,
+            "stats": self.npc_brain.get_statistics(),
+        })
+
+    def _build_match_result_text(self) -> str:
+        if self.player.health > self.npc.health:
+            return STRINGS[self.language]["you_win"]
+        if self.npc.health > self.player.health:
+            return STRINGS[self.language]["you_lose"]
+        return STRINGS[self.language]["draw"]
+
+    def _describe_rbc_decision(self, action_name: str, mode: str, can_see: bool, distance: float, angle_diff: float) -> str:
+        """Gera descricao interpretavel da decisao atual do RBC."""
+        if self.language == "EN":
+            base_map = {
+                "fire": "Firing because target is visible and aligned",
+                "align_and_fire": "Adjusting aim before firing",
+                "pursue": "Pursuing to keep pressure on the player",
+                "search": "Scanning area to reacquire target",
+                "wander": "Repositioning to explore new angle",
+                "random_rotate": "Rotating to open vision cone",
+                "idle": "Holding position briefly",
+            }
+            visibility = "target visible" if can_see else "target lost"
+            reason = base_map.get(action_name, "Choosing next tactical action")
+            return (
+                f"{reason}. Context: {visibility}, dist={int(distance)}px, "
+                f"angle={angle_diff:.1f}deg, mode={mode}."
+            )
+
+        base_map = {
+            "fire": "Atirando porque o alvo esta visivel e alinhado",
+            "align_and_fire": "Ajustando a mira antes de atirar",
+            "pursue": "Perseguindo para manter pressao no jogador",
+            "search": "Varrendo a area para reencontrar o alvo",
+            "wander": "Reposicionando para explorar novo angulo",
+            "random_rotate": "Rotacionando para abrir o campo de visao",
+            "idle": "Mantendo posicao por um instante",
+        }
+        visibility = "alvo visivel" if can_see else "alvo perdido"
+        reason = base_map.get(action_name, "Escolhendo a proxima acao tatica")
+        return (
+            f"{reason}. Contexto: {visibility}, dist={int(distance)}px, "
+            f"angulo={angle_diff:.1f}graus, modo={mode}."
+        )
+
+    def _describe_rbc_decision_compact(self, action_name: str, mode: str, can_see: bool) -> str:
+        """Descricao curta para visualizacao compacta no monitor RBC."""
+        if self.language == "EN":
+            map_en = {
+                "fire": "Firing at target",
+                "align_and_fire": "Aiming before firing",
+                "pursue": "Pursuing player",
+                "search": "Scanning area",
+                "wander": "Repositioning",
+                "random_rotate": "Rotating to find target",
+                "idle": "Holding position",
+            }
+            state = "target visible" if can_see else "target lost"
+            return f"{map_en.get(action_name, 'Choosing tactical action')} [{mode} | {state}]"
+
+        map_pt = {
+            "fire": "Atirando no alvo",
+            "align_and_fire": "Alinhando mira para atirar",
+            "pursue": "Perseguindo jogador",
+            "search": "Varrendo a area",
+            "wander": "Reposicionando",
+            "random_rotate": "Rotacionando para encontrar alvo",
+            "idle": "Mantendo posicao",
+        }
+        state = "alvo visivel" if can_see else "alvo perdido"
+        return f"{map_pt.get(action_name, 'Escolhendo acao tatica')} [{mode} | {state}]"
 
     def _collide_proj_tank(self, p, tank):
         # Verifica colisão entre projétil e tanque / Check collision between projectile and tank
@@ -608,6 +729,7 @@ class Game:
         
         # Atualiza expressão da carinha do NPC / Update NPC face expression
         can_see = self.npc_perception.last_seen_player_pos is not None
+        dist = math.sqrt((self.player.x - self.npc.x)**2 + (self.player.y - self.npc.y)**2)
         angle_to_player = math.degrees(math.atan2(self.player.y - self.npc.y, self.player.x - self.npc.x))
         angle_diff = abs(angle_to_player - self.npc.angle)
         if angle_diff > 180:
@@ -622,7 +744,6 @@ class Game:
 
         # DEBUG: Mostra estado do NPC
         if self.debug_mode and self.frame_counter % 30 == 0:  # A cada 30 frames (~500ms)
-            dist = math.sqrt((self.player.x - self.npc.x)**2 + (self.player.y - self.npc.y)**2)
             can_see = self.npc_perception.last_seen_player_pos is not None
             angle_to_player = math.degrees(math.atan2(self.player.y - self.npc.y, self.player.x - self.npc.x))
             angle_diff = abs(angle_to_player - self.npc.angle)
@@ -639,6 +760,32 @@ class Game:
             self.action_frame_counter = 0
         else:
             self.action_frame_counter += 1
+        self._decision_counter += 1
+        if self.rbc_monitor.is_enabled():
+            stats = self.npc_brain.get_statistics()
+            mode = stats.get("mode", "-")
+            readable_reason = self._describe_rbc_decision(
+                action_name=action.action,
+                mode=mode,
+                can_see=can_see,
+                distance=dist,
+                angle_diff=angle_diff,
+            )
+            params_text = action.params if action.params else {}
+            compact_text = self._describe_rbc_decision_compact(
+                action_name=action.action,
+                mode=mode,
+                can_see=can_see,
+            )
+            line = (
+                f"#{self._decision_counter:04d} {readable_reason} "
+                f"[action={action.action} params={params_text}]"
+            )
+            self.rbc_monitor.push_decision({
+                "group_key": f"{mode}:{action.action}",
+                "compact_text": compact_text,
+                "full_text": line,
+            })
 
     def _execute_npc_action(self, action: Solution, dt: float) -> None:
         """
@@ -1261,38 +1408,31 @@ class Game:
     def _draw_gameover(self):
         # Desenha tela de fim de jogo / Draw game over screen
 
-        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
-        overlay.set_alpha(180)
-        overlay.fill((0, 0, 0))
-        self.screen.blit(overlay, (0, 0))
+        # Fundo com mesma linguagem visual das demais telas
+        self.screen.fill((20, 26, 36))
+        pygame.draw.circle(self.screen, (35, 70, 70), (140, 90), 120)
+        pygame.draw.circle(self.screen, (60, 50, 85), (SCREEN_WIDTH - 100, 120), 150)
 
+        panel = pygame.Rect(SCREEN_WIDTH // 2 - 250, 140, 500, 300)
+        pygame.draw.rect(self.screen, (25, 30, 42), panel, border_radius=12)
+        pygame.draw.rect(self.screen, (70, 95, 120), panel, 2, border_radius=12)
 
-        winner = STRINGS[self.language]["draw"]
+        title = self.section_title_font.render(STRINGS[self.language]["game_over"], True, (235, 240, 245))
+        self.screen.blit(title, title.get_rect(center=(SCREEN_WIDTH // 2, 198)))
 
+        result_text = self.match_result_text or self._build_match_result_text()
         if self.player.health > self.npc.health:
-            if self.language == "EN":
-                winner = f"{self.player_name} wins"
-            else:
-                winner = f"{self.player_name} venceu"
-
+            result_color = (120, 220, 140)
         elif self.npc.health > self.player.health:
-            if self.language == "EN":
-                winner = "NPC wins"
-            else:
-                winner = "NPC venceu"
+            result_color = (235, 120, 120)
+        else:
+            result_color = (220, 220, 220)
 
+        result_surface = self.menu_title_font.render(result_text, True, result_color)
+        self.screen.blit(result_surface, result_surface.get_rect(center=(SCREEN_WIDTH // 2, 286)))
 
-
-        title = pygame.font.Font(None, 64).render(STRINGS[self.language]["game_over"], True, (240, 240, 240))
-        self.screen.blit(title, title.get_rect(center=(SCREEN_WIDTH // 2, 140)))
-        sub = self.font.render(winner, True, (210, 210, 210))
-        self.screen.blit(sub, sub.get_rect(center=(SCREEN_WIDTH // 2, 220)))
-
-        # Exibe estatísticas RBC se disponível
-        self._draw_rbc_statistics()
-
-        hint = self.font.render(STRINGS[self.language]["press_enter"], True, (160, 160, 160))
-        self.screen.blit(hint, hint.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 80)))
+        hint = self.small_font.render(STRINGS[self.language]["press_enter"], True, (180, 195, 210))
+        self.screen.blit(hint, hint.get_rect(center=(SCREEN_WIDTH // 2, 398)))
 
         # Trata tecla para retornar / handle key to return
         keys = pygame.key.get_pressed()
@@ -1335,63 +1475,6 @@ class Game:
         self.start_new_game()
         
         print("[DEBUG] Banco de dados RBC resetado! Partida reiniciada.")
-
-    def _draw_rbc_statistics(self):
-
-        """Exibe estatísticas do motor RBC na tela de game over."""
-    
-        stats = self.npc_brain.get_statistics()
-        
-        y_start = 320
-        box_x = SCREEN_WIDTH // 2 - 150
-        box_w = 300
-        box_h = 160  
-
-        pygame.draw.rect(self.screen, (20,20,30), (box_x, y_start, box_w, box_h), border_radius=6)
-        pygame.draw.rect(self.screen, (100,120,100), (box_x, y_start, box_w, box_h), 2, border_radius=6)
-
-        # Dados
-        y = y_start + 40
-
-        total_txt = self.small_font.render(
-            f"Total Cases: {stats['total_cases']}",
-            True,
-            (200, 200, 200)
-        )
-        self.screen.blit(total_txt, (box_x + 15, y))
-        y += 25
-
-        mode_txt = self.small_font.render(
-            f"Mode: {stats.get('mode', 'N/A')} | Episode: {stats.get('episode', 0)}",
-            True,
-            (180, 180, 255)
-        )
-        self.screen.blit(mode_txt, (box_x + 15, y))
-        y += 25
-
-        epsilon_txt = self.small_font.render(
-            f"Epsilon: {stats.get('epsilon', 0):.3f}",
-            True,
-            (200, 180, 120)
-        )
-        self.screen.blit(epsilon_txt, (box_x + 15, y))
-        y += 25
-
-        reward_txt = self.small_font.render(
-            f"Avg Reward: {stats['avg_reward']:.2f}",
-            True,
-            (150, 150, 150)
-        )
-        self.screen.blit(reward_txt, (box_x + 15, y))
-        y += 25
-
-        success_txt = self.small_font.render(
-            f"Avg Success: {stats['avg_success_rate']:.1%}",
-            True,
-            (150, 200, 150)
-        )
-        self.screen.blit(success_txt, (box_x + 15, y))
-
 
 if __name__ == "__main__":
     g = Game()
