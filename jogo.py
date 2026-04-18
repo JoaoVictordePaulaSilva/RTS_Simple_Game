@@ -418,6 +418,10 @@ class Game:
         # Tanks at left and right, constrained to Y movement
         self.player = Tank(140, SCREEN_HEIGHT // 2, (40, 120, 200), is_player=True, name=self.player_name if self.player_name else STRINGS[self.language]["player"])
         self.npc = Tank(SCREEN_WIDTH - 140, SCREEN_HEIGHT // 2, (200, 100, 60), is_player=False, name=STRINGS[self.language]["enemy"])
+        # Modo sem rotação: cada tanque mantém um ângulo fixo.
+        # Jogador olha para direita (0°) e NPC para esquerda (180°).
+        self.player.angle = 0
+        self.npc.angle = 180
         self.npc_perception = NPCPerception(self.npc)
         self.projectiles = []
         self.last_ai_shot = 0
@@ -533,11 +537,7 @@ class Game:
                 self.player.move_y(-1, dt)
             if keys[pygame.K_DOWN]:
                 self.player.move_y(1, dt)
-            # Rotação / rotation
-            if keys[pygame.K_LEFT]:
-                self.player.rotate(-1, dt)
-            if keys[pygame.K_RIGHT]:
-                self.player.rotate(1, dt)
+            # Rotação do jogador desativada: somente movimento no eixo Y.
 
             # Atualização de cooldown / Player cooldown update
             self.player.update(dt)
@@ -845,6 +845,8 @@ class Game:
         if self.debug_mode and self.frame_counter % 30 == 0:
             print(f"[EXECUTE] Action: {action_type} | Params: {params}")
 
+        # Rotação do NPC desativada: só executa ações de tiro e movimento no eixo Y.
+
         # Fire: dispara na direção atual (SEMPRE usa ângulo visual do NPC)
         if action_type == "fire":
             self.last_ai_shot += dt
@@ -867,30 +869,11 @@ class Game:
 
         # Align and fire: alinha antes de disparar
         elif action_type == "align_and_fire":
-            # Calcula ângulo absoluto do jogador / Calculate absolute angle to player
-            if self.npc_perception.last_seen_player_pos:
-                dx = self.npc_perception.last_seen_player_pos[0] - self.npc.x
-                dy = self.npc_perception.last_seen_player_pos[1] - self.npc.y
-                target_angle = math.degrees(math.atan2(dy, dx))
-            else:
-                target_angle = self.npc.angle
-            
-            # Alinha em direção ao alvo / Align toward target
-            self.npc.angle = self._approach_angle(self.npc.angle, target_angle, self.npc.rot_speed * dt)
-            
-            # Tenta disparar após estar alinhado / Try to fire once aligned
+            # Sem rotação: trata como tentativa de disparo agressiva.
             self.last_ai_shot += dt
-            # Use a slightly faster rate for align-and-fire attempts so NPC isn't too passive
             if self.last_ai_shot >= max(0.2, self.ai_shot_interval * 0.6):
                 self.last_ai_shot = 0
-                # Calcula ângulo atual vs alvo / Calculate current angle vs target
-                angle_diff = abs(target_angle - self.npc.angle)
-                if angle_diff > 180:
-                    angle_diff = 360 - angle_diff
-                
-                # Dispara se alinhado o suficiente / Fire if aligned enough
-                # Use tolerância maior para garantir que NPC atire enquanto se ajusta
-                if self.npc.can_fire() and angle_diff < 40:  # Tolerância de 40° para ser mais agressivo
+                if self.npc.can_fire():
                     self.npc.fire()
                     proj = Projectile(
                         self.npc.x + math.cos(math.radians(self.npc.angle)) * 40,
@@ -901,7 +884,7 @@ class Game:
                     self.projectiles.append(proj)
                     self.npc_perception.log_event("FIRE", f"ângulo {int(self.npc.angle)}°")
                     if self.debug_mode:
-                        print(f"  ✓ FIRED (aligned) at angle {self.npc.angle:.0f}° | ang_diff={angle_diff:.1f}°")
+                        print(f"  ✓ FIRED (no-rotate mode) at angle {self.npc.angle:.0f}°")
 
         # Pursue: persegue o jogador
         elif action_type == "pursue":
@@ -915,19 +898,13 @@ class Game:
                 if abs(target_y - self.npc.y) > 10:
                     direction = 1 if target_y > self.npc.y else -1
                     self.npc.move_y(direction * speed_multiplier, dt)
-                
-                # Rotaciona para encarar jogador
-                if params.get("rotate", True):
-                    dx = self.npc_perception.last_seen_player_pos[0] - self.npc.x
-                    dy = self.npc_perception.last_seen_player_pos[1] - self.npc.y
-                    angle_to_target = math.degrees(math.atan2(dy, dx))
-                    self.npc.angle = self._approach_angle(self.npc.angle, angle_to_target, self.npc.rot_speed * dt)
 
         # Search: procura pelo jogador
         elif action_type == "search":
-            rotation_dir = params.get("rotation_direction", 1)
-            self.npc.rotate(rotation_dir, dt * 0.7)
-            self.npc_perception.log_event("SEARCH", "Procurando alvo...")
+            # Sem rotação: faz varredura vertical curta para buscar o alvo.
+            direction = params.get("direction", 1)
+            self.npc.move_y(direction * 0.45, dt)
+            self.npc_perception.log_event("SEARCH", "Varredura vertical...")
 
         elif action_type == "wander":
             direction = params.get("direction", 1)
@@ -935,8 +912,9 @@ class Game:
             self.npc.move_y(direction * speed, dt)
 
         elif action_type == "random_rotate":
+            # Rotação desativada: converte para reposicionamento vertical.
             direction = params.get("direction", 1)
-            self.npc.rotate(direction, dt)
+            self.npc.move_y(direction * 0.55, dt)
 
         # Idle: fica parado
         elif action_type == "idle":
