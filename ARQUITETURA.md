@@ -8,7 +8,6 @@ d:\Projetos Facul\TCC\RTS em Pygames\
 ├── database.py             (Gerenciamento SQLite)
 ├── rbc_engine.py          (Motor de RBC)
 ├── npc_brain.py           (Cérebro do NPC)
-├── seed_cases.py          (Casos iniciais)
 ├── db_init.py             (Inicialização do BD)
 ├── test_rbc.py            (Testes unitários)
 ├── npc_cases.db           (Banco de dados SQLite - criado automaticamente)
@@ -31,7 +30,7 @@ Classes principais:
 - `Game`: Classe principal que orquestra tudo
 
 Modificações para RBC:
-- Import dos módulos: `npc_brain`, `seed_cases`, `db_init`
+- Import dos módulos: `npc_brain`, `db_init`
 - Inicializa `NPCBrain` no `__init__`
 - Chama `npc_brain.decide_action()` em `_update_npc_ai()`
 - Reporta resultados em colisões via `npc_brain.report_outcome()`
@@ -136,20 +135,7 @@ Tipos de ações:
 
 ---
 
-### `seed_cases.py` (~80 linhas)
-**Casos iniciais para bootstrap**
-
-Função:
-- `load_seed_cases()`: Retorna lista de 7 casos seed
-
-Casos pré-programados:
-1. `seed_close_clear_shot`: 80px distância → dispara
-2. `seed_medium_pursuit`: 200px distância → alinha e dispara
-3. `seed_long_pursuit`: 350px distância → persegue
-4. `seed_target_lost_recent`: Alvo perdido → busca
-5. `seed_low_health_defensive`: NPC com saúde baixa → defesa
-6. `seed_easy_mid_range`: Modo fácil → tática média
-7. `seed_hard_evasion`: Modo difícil → evasão
+<!-- seed_cases removed: bootstrapping is now handled internally by the DB initialization. -->
 
 ---
 

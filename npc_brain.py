@@ -27,10 +27,106 @@ class NPCBrain:
         self.frame_counter = 0
         self.last_action: Optional[Solution] = None
         self.pending_outcome: Optional[Tuple[Problem, Solution]] = None
+        self.episode_frame_count = 0  # Conta frames desde início do episódio
+        self.episode_frame_limit = 1800  # ~30s a 60fps para penalizar luta longa
+        self.verbose = False  # Flag para debug
+        
+        # === Tracking para detecção de ações ineficazes ===
+        self.position_history = []  # Últimas posições (x, y)
+        self.action_history = []  # Últimas ações executadas
+        self.recent_damage_history = []  # Dano causado nos últimos N frames
+        self.max_history = 60  # Rastreia últimos ~1s (60 frames a 60fps)
+        self.stuck_frame_count = 0  # Frames consecutivos na mesma área
+        self.stuck_threshold_frames = 45  # Threshold para considerar travado
+        self.stuck_position_tolerance = 50.0  # px - distância máxima para considerar "mesma posição"
+        self.ineffectiveness_boost_base = 0.1  # Incremento base para exploração quando ineficaz
 
     def set_session(self, session_id: str) -> None:
         """Define ID da sessão atual para logging."""
         self.session_id = session_id
+    
+    def reset_episode(self) -> None:
+        """Reseta contadores de episódio (chamada no início de cada partida/episódio)."""
+        self.episode_frame_count = 0
+        self.pending_outcome = None
+        self.position_history = []
+        self.action_history = []
+        self.recent_damage_history = []
+        self.stuck_frame_count = 0
+    
+    def _track_action_effectiveness(self, npc_x: float, npc_y: float, action: Solution, damage_dealt: float) -> None:
+        """
+        Rastreia posição, ação e dano para detectar comportamentos ineficazes.
+        
+        Args:
+            npc_x, npc_y: Posição atual do NPC
+            action: Ação executada
+            damage_dealt: Dano causado neste frame
+        """
+        # Rastreia posição
+        self.position_history.append((npc_x, npc_y))
+        if len(self.position_history) > self.max_history:
+            self.position_history.pop(0)
+        
+        # Rastreia ação
+        self.action_history.append(action.action)
+        if len(self.action_history) > self.max_history:
+            self.action_history.pop(0)
+        
+        # Rastreia dano
+        self.recent_damage_history.append(damage_dealt)
+        if len(self.recent_damage_history) > self.max_history:
+            self.recent_damage_history.pop(0)
+    
+    def _detect_ineffectiveness(self) -> Tuple[bool, dict]:
+        """
+        Detecta se o NPC está em um padrão ineficaz (travado, repetindo ações sem sucesso).
+        
+        Returns:
+            (is_ineffective: bool, metrics: dict com detalhes)
+        """
+        metrics = {
+            "is_stuck_position": False,
+            "is_repeating_action": False,
+            "total_recent_damage": 0.0,
+            "stuck_duration_frames": 0,
+        }
+        
+        if len(self.position_history) < self.stuck_threshold_frames:
+            return False, metrics
+        
+        # Verifica se está na mesma posição
+        recent_positions = self.position_history[-self.stuck_threshold_frames:]
+        if len(recent_positions) >= self.stuck_threshold_frames:
+            first_pos = recent_positions[0]
+            same_area_count = 0
+            for pos in recent_positions:
+                dist = math.sqrt((pos[0] - first_pos[0])**2 + (pos[1] - first_pos[1])**2)
+                if dist <= self.stuck_position_tolerance:
+                    same_area_count += 1
+            
+            is_stuck = (same_area_count / len(recent_positions)) > 0.8  # 80%+ dos frames na mesma área
+            if is_stuck:
+                metrics["is_stuck_position"] = True
+                metrics["stuck_duration_frames"] = self.stuck_threshold_frames
+        
+        # Verifica repetição de ações
+        recent_actions = self.action_history[-self.stuck_threshold_frames:]
+        if recent_actions:
+            most_common_action = max(set(recent_actions), key=recent_actions.count)
+            action_repetition = recent_actions.count(most_common_action) / len(recent_actions)
+            if action_repetition > 0.7:  # 70%+ repetição
+                metrics["is_repeating_action"] = True
+        
+        # Verifica dano causado
+        total_damage = sum(self.recent_damage_history[-self.stuck_threshold_frames:])
+        metrics["total_recent_damage"] = total_damage
+        
+        # Considera ineficaz se está travado OU repetindo e sem causar dano significativo
+        is_ineffective = (metrics["is_stuck_position"] and total_damage < 5.0) or \
+                        (metrics["is_repeating_action"] and total_damage < 3.0)
+        
+        return is_ineffective, metrics
 
     def decide_action(
         self,
@@ -43,7 +139,10 @@ class NPCBrain:
         player_health: float,
         player_visible: bool,
         frames_since_last_seen: int,
-        difficulty: str = "Normal"
+        difficulty: str = "Normal",
+        nearest_projectile_distance: float = None,
+        nearest_projectile_angle: float = None,
+        projectiles_nearby_count: int = 0,
     ):
         """
         Decide ação do NPC baseado no estado atual.
@@ -67,6 +166,7 @@ class NPCBrain:
             npc_x, npc_y, npc_angle, npc_health,
             player_x, player_y, player_health,
             player_visible, frames_since_last_seen
+            , nearest_projectile_distance, nearest_projectile_angle, projectiles_nearby_count
         )
 
         # Gera solução padrão como fallback
@@ -83,6 +183,11 @@ class NPCBrain:
         self.last_action = solution
         self.pending_outcome = (problem, solution)
         self.frame_counter += 1
+        self.episode_frame_count += 1  # Incrementa contador de frames do episódio
+        
+        # Rastreia eficácia de ações (para posterior análise)
+        # Nota: damage será adicionado em report_outcome, por enquanto usa 0
+        self._track_action_effectiveness(npc_x, npc_y, solution, 0.0)
 
         return solution
     
@@ -95,6 +200,7 @@ class NPCBrain:
         npc_x: float, npc_y: float, npc_angle: float, npc_health: float,
         player_x: float, player_y: float, player_health: float,
         player_visible: bool, frames_since_last_seen: int
+        , nearest_projectile_distance: float = None, nearest_projectile_angle: float = None, projectiles_nearby_count: int = 0
     ) -> Problem:
         """
         Codifica estado do jogo como problema RBC.
@@ -117,7 +223,12 @@ class NPCBrain:
             npc_health=npc_health,
             player_health=player_health,
             player_visible=player_visible,
-            frames_lost=frames_since_last_seen
+            frames_lost=frames_since_last_seen,
+            npc_x=npc_x,
+            npc_y=npc_y,
+            nearest_projectile_distance=nearest_projectile_distance if nearest_projectile_distance is not None else float('inf'),
+            nearest_projectile_angle=nearest_projectile_angle if nearest_projectile_angle is not None else 0.0,
+            projectiles_nearby_count=projectiles_nearby_count,
         )
 
     def _generate_fallback_action(self, problem: Problem) -> Solution:
@@ -128,6 +239,14 @@ class NPCBrain:
         Essa função é usada para EXPLORAÇÃO no cold start do RBC.
         """
         import random
+
+        # Se há projéteis próximos, prioriza evasão
+        if getattr(problem, 'projectiles_nearby_count', 0) > 0:
+            # direção de evasão baseada no ângulo relativo do projétil
+            ang = getattr(problem, 'nearest_projectile_angle', 0.0)
+            # se projétil vindo pela 'baixo' (ângulo positivo), sobe; se vindo por cima, desce
+            direction = -1 if ang > 0 else 1
+            return Solution(action="evade_projectile", params={"direction": direction, "speed": 0.9})
 
         # Se jogador está visível - prioriza ações ofensivas
         if problem.player_visible:
@@ -245,6 +364,10 @@ class NPCBrain:
             damage_taken=damage_taken,
             outcome_type=outcome_type
         )
+        
+        # Atualiza histórico de dano para detecção de eficácia
+        if self.recent_damage_history:
+            self.recent_damage_history[-1] = damage_dealt  # Atualiza último frame com dano real
 
         # ===== SISTEMA DE REWARD APRIMORADO =====
         # Reward base começa neutro
@@ -294,8 +417,42 @@ class NPCBrain:
         if problem.player_visible:
             reward += 2.0
         
+        # 8. Multiplicador de vitória: se o jogador foi derrotado (damage_dealt >= 100 ou jogador morto)
+        # Assumimos que outcome_type == 'hit' com dano alto indica vitória iminente
+        player_defeated = damage_dealt >= 100 or outcome_type == "player_dead"
+        if player_defeated:
+            reward *= 2.5  # Bônus multiplicativo de 250% para vitória
+            if self.verbose:
+                print(f"[REWARD] Multiplicador de vitória aplicado! Reward final x2.5")
+        
+        # 9. Penalidade gradual por duração da partida (incentiva vitória rápida)
+        # Penaliza progressivamente conforme a partida avança
+        if self.episode_frame_count > 0:
+            time_penalty = (self.episode_frame_count / self.episode_frame_limit) * 5.0
+            reward -= time_penalty
+        
+        # 10. Detecção de ineficácia: penaliza comportamentos presos/repetitivos e aumenta exploração
+        is_ineffective, ineffectiveness_metrics = self._detect_ineffectiveness()
+        if is_ineffective:
+            # Penaliza por ineficácia
+            ineffectiveness_penalty = ineffectiveness_metrics["stuck_duration_frames"] * 0.05
+            reward -= ineffectiveness_penalty
+            
+            # Aumenta epsilon (exploração) dinamicamente
+            epsilon_boost = self.ineffectiveness_boost_base * (ineffectiveness_metrics["stuck_duration_frames"] / self.stuck_threshold_frames)
+            old_epsilon = self.rbc_engine.epsilon
+            self.rbc_engine.epsilon = min(0.9, self.rbc_engine.epsilon + epsilon_boost)
+            
+            if self.verbose:
+                print(f"[INEFFECTIVENESS] Comportamento ineficaz detectado!")
+                print(f"  - Travado: {ineffectiveness_metrics['is_stuck_position']}")
+                print(f"  - Repetindo ações: {ineffectiveness_metrics['is_repeating_action']}")
+                print(f"  - Dano nos últimos {ineffectiveness_metrics['stuck_duration_frames']}f: {ineffectiveness_metrics['total_recent_damage']:.1f}")
+                print(f"  - Epsilon aumentou: {old_epsilon:.3f} → {self.rbc_engine.epsilon:.3f}")
+                print(f"  - Penalidade aplicada: -{ineffectiveness_penalty:.1f}")
+        
         # Garante que reward não seja extremamente negativo (para não desencorajar totalmente)
-        reward = max(-20.0, reward)
+        reward = max(-25.0, reward)
 
         outcome.reward = reward
 

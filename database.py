@@ -66,7 +66,35 @@ class CaseDatabase:
         )
         """)
 
+        # Migração leve: adiciona colunas de percepção de projéteis se faltarem
+        cursor.execute("PRAGMA table_info(rbc_cases)")
+        existing_cols = {row['name'] for row in cursor.fetchall()}
+        # Campos novos: distância/ângulo/proj_count
+        if 'problem_nearest_projectile_distance' not in existing_cols:
+            cursor.execute("ALTER TABLE rbc_cases ADD COLUMN problem_nearest_projectile_distance REAL DEFAULT 999999")
+        if 'problem_nearest_projectile_angle' not in existing_cols:
+            cursor.execute("ALTER TABLE rbc_cases ADD COLUMN problem_nearest_projectile_angle REAL DEFAULT 0.0")
+        if 'problem_projectiles_nearby_count' not in existing_cols:
+            cursor.execute("ALTER TABLE rbc_cases ADD COLUMN problem_projectiles_nearby_count INTEGER DEFAULT 0")
+
         self.connection.commit()
+
+        # Pesos de similaridade configuráveis (podem ser ajustados para tuning)
+        # Soma aproximada deve ser 1.0 para manter interpretação consistente
+        self.similarity_weights = {
+            "distance": 0.30,
+            "angle": 0.12,
+            "health": 0.12,
+            "visibility": 0.12,
+            "proj_dist": 0.08,
+            "proj_angle": 0.04,
+            "proj_count": 0.04,
+            # Novos componentes
+            "age": 0.06,
+            "outcome": 0.06,
+            "action_history": 0.03,
+            "closing_speed": 0.03,
+        }
 
     # ==========================================================
     # INSERT CASE
@@ -97,6 +125,7 @@ class CaseDatabase:
                 case_id,
                 player_id,
                 problem_distance, problem_angle_diff,
+                problem_nearest_projectile_distance, problem_nearest_projectile_angle, problem_projectiles_nearby_count,
                 problem_npc_health, problem_player_health, problem_player_visible,
                 problem_frames_lost,
                 solution_action, solution_params,
@@ -105,12 +134,15 @@ class CaseDatabase:
                 usage_count, success_count, success_rate,
                 total_reward, avg_reward
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             case_id,
             case_data.get("player_id", "unknown"),
             case_data.get("problem_distance", 0),
             case_data.get("problem_angle_diff", 0),
+            case_data.get("problem_nearest_projectile_distance", 999999),
+            case_data.get("problem_nearest_projectile_angle", 0.0),
+            case_data.get("problem_projectiles_nearby_count", 0),
             case_data.get("problem_npc_health", 100),
             case_data.get("problem_player_health", 100),
             1 if case_data.get("problem_player_visible") else 0,
@@ -230,26 +262,110 @@ class CaseDatabase:
         angle_diff = abs(problem.get("angle_diff", 0) - case["problem_angle_diff"])
         health_diff = abs(problem.get("npc_health", 100) - case["problem_npc_health"])
 
+        # Similaridade básica para distância/ângulo/vida/visibilidade
         dist_similarity = max(0, 1 - (distance_diff / 800))
         angle_similarity = max(0, 1 - (angle_diff / 180))
         health_similarity = max(0, 1 - (health_diff / 100))
         visibility_match = (
-            1.0 if problem.get("player_visible") == bool(case["problem_player_visible"])
+            1.0 if problem.get("player_visible") == bool(case["problem_player_visible"]) 
             else 0.3
         )
 
-        weights = {
-            "distance": 0.4,
-            "angle": 0.2,
-            "health": 0.2,
-            "visibility": 0.2
-        }
+        # Percepção de projéteis (não preditiva)
+        p_nearest_prob = problem.get("nearest_projectile_distance", float('inf'))
+        c_nearest_prob = case.get("problem_nearest_projectile_distance", 999999)
+        # Se ambos não têm projéteis, similaridade alta
+        if (p_nearest_prob == float('inf') or p_nearest_prob >= 999999) and (c_nearest_prob is None or c_nearest_prob >= 999999):
+            proj_dist_similarity = 1.0
+        elif p_nearest_prob == float('inf') or p_nearest_prob >= 999999 or c_nearest_prob is None or c_nearest_prob >= 999999:
+            proj_dist_similarity = 0.0
+        else:
+            proj_dist_similarity = max(0, 1 - (abs(p_nearest_prob - c_nearest_prob) / 800))
+
+        p_nearest_ang = problem.get("nearest_projectile_angle", 0.0)
+        c_nearest_ang = case.get("problem_nearest_projectile_angle", 0.0)
+        ang_diff_proj = abs(p_nearest_ang - c_nearest_ang)
+        if ang_diff_proj > 180:
+            ang_diff_proj = 360 - ang_diff_proj
+        proj_angle_similarity = max(0, 1 - (ang_diff_proj / 180))
+
+        p_count = problem.get("projectiles_nearby_count", 0)
+        c_count = case.get("problem_projectiles_nearby_count", 0)
+        # Similaridade por count (normalizado em 0..5)
+        proj_count_similarity = max(0, 1 - (abs(p_count - c_count) / 5))
+
+        # Componentes novos: idade do caso, estatísticas de outcome, histórico de ações, velocidade de aproximação
+
+        # --- Age / temporalidade ---
+        age_similarity = 0.5
+        try:
+            case_ts = case.get("timestamp")
+            if case_ts:
+                # SQLite CURRENT_TIMESTAMP format: 'YYYY-MM-DD HH:MM:SS'
+                try:
+                    case_dt = datetime.strptime(case_ts, "%Y-%m-%d %H:%M:%S")
+                except Exception:
+                    # fallback para ISO parse
+                    case_dt = datetime.fromisoformat(case_ts)
+                age_seconds = (datetime.now() - case_dt).total_seconds()
+                max_age = 60 * 60 * 24  # 1 dia em segundos
+                age_similarity = max(0.0, 1.0 - (age_seconds / max_age))
+        except Exception:
+            age_similarity = 0.5
+
+        # --- Outcomes estatísticos mais finos ---
+        # Usa avg_reward e success_rate quando disponíveis
+        avg_reward = case.get("avg_reward", 0.0) or 0.0
+        success_rate = case.get("success_rate", 0.0) or 0.0
+        # Normaliza avg_reward em faixa [-20, +50] -> [0,1]
+        min_r, max_r = -20.0, 50.0
+        norm_avg_reward = (max(min(avg_reward, max_r), min_r) - min_r) / (max_r - min_r)
+        outcome_similarity = (0.6 * norm_avg_reward) + (0.4 * success_rate)
+
+        # --- Histórico de ações curtas (opcional) ---
+        action_history_similarity = 0.5
+        try:
+            p_hist = problem.get("recent_actions") or []
+            c_hist = case.get("recent_actions") or []
+            if p_hist and c_hist:
+                set_p = set(p_hist)
+                set_c = set(c_hist)
+                inter = len(set_p.intersection(set_c))
+                uni = len(set_p.union(set_c))
+                if uni > 0:
+                    action_history_similarity = inter / uni
+        except Exception:
+            action_history_similarity = 0.5
+
+        # --- Velocidade relativa / closing speed (opcional) ---
+        closing_similarity = 0.5
+        try:
+            p_closing = problem.get("closing_speed")
+            c_closing = case.get("problem_closing_speed")
+            if p_closing is not None and c_closing is not None:
+                max_speed = 600.0
+                closing_similarity = max(0.0, 1.0 - (abs(p_closing - c_closing) / max_speed))
+                # reforça se ambos têm sinal de aproximação/afastamento igual
+                if (p_closing >= 0) == (c_closing >= 0):
+                    closing_similarity = min(1.0, closing_similarity + 0.1)
+        except Exception:
+            closing_similarity = 0.5
+
+        # Recupera pesos configuráveis
+        weights = self.similarity_weights
 
         similarity = (
-            dist_similarity * weights["distance"] +
-            angle_similarity * weights["angle"] +
-            health_similarity * weights["health"] +
-            visibility_match * weights["visibility"]
+            dist_similarity * weights.get("distance", 0.0) +
+            angle_similarity * weights.get("angle", 0.0) +
+            health_similarity * weights.get("health", 0.0) +
+            visibility_match * weights.get("visibility", 0.0) +
+            proj_dist_similarity * weights.get("proj_dist", 0.0) +
+            proj_angle_similarity * weights.get("proj_angle", 0.0) +
+            proj_count_similarity * weights.get("proj_count", 0.0) +
+            age_similarity * weights.get("age", 0.0) +
+            outcome_similarity * weights.get("outcome", 0.0) +
+            action_history_similarity * weights.get("action_history", 0.0) +
+            closing_similarity * weights.get("closing_speed", 0.0)
         )
 
         return min(1.0, max(0.0, similarity))

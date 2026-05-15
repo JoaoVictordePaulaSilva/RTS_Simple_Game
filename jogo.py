@@ -235,6 +235,10 @@ class NPCPerception:
         self.last_player_angle = None
         self.player_moving_up_time = 0
         self.player_moving_down_time = 0
+        # Atributos de detecção de projéteis
+        self.nearest_projectile_distance = float('inf')
+        self.nearest_projectile_angle = 0.0
+        self.projectiles_nearby_count = 0
         
     def can_see(self, other_tank):
         # Verifica se pode ver o outro tanque
@@ -256,7 +260,7 @@ class NPCPerception:
         # Verifica se está no cone de visão / Check if in vision cone
         return angle_diff < self.vision_angle / 2
     
-    def update(self, player_tank, dt):
+    def update(self, player_tank, dt, projectiles=None):
         # Atualiza a percepção do NPC
         # Update NPC perception
         if self.can_see(player_tank):
@@ -296,6 +300,33 @@ class NPCPerception:
         # Mantém apenas últimos 30 frames de memória / Keep only last 30 frames of memory
         if len(self.perception_memory) > 30:
             self.perception_memory.pop(0)
+
+        # ===== Detecção de projéteis (estático, sem previsão) =====
+        # projectiles: lista de objetos com atributos x, y
+        self.nearest_projectile_distance = float('inf')
+        self.nearest_projectile_angle = 0.0
+        self.projectiles_nearby_count = 0
+        if projectiles:
+            nx, ny = self.tank.x, self.tank.y
+            nearest = None
+            for p in projectiles:
+                # Calcula distância e ângulo relativo
+                dx = p.x - nx
+                dy = p.y - ny
+                dist = math.hypot(dx, dy)
+                if dist < self.nearest_projectile_distance:
+                    self.nearest_projectile_distance = dist
+                    ang = math.degrees(math.atan2(dy, dx))
+                    # ângulo relativo ao ângulo do tanque
+                    rel_ang = ang - self.tank.angle
+                    if rel_ang > 180:
+                        rel_ang -= 360
+                    if rel_ang < -180:
+                        rel_ang += 360
+                    self.nearest_projectile_angle = rel_ang
+                # Conta projéteis dentro de um raio relevante (ex.: 300 px)
+                if dist <= 300:
+                    self.projectiles_nearby_count += 1
     
     def log_event(self, event_type, details=""):
         # Registra evento de percepção / Log perception event
@@ -543,8 +574,8 @@ class Game:
             self.player.update(dt)
             self.npc.update(dt)
             
-            # Atualiza percepção do NPC / Update NPC perception
-            self.npc_perception.update(self.player, dt)
+            # Atualiza percepção do NPC / Update NPC perception (inclui projéteis)
+            self.npc_perception.update(self.player, dt, projectiles=self.projectiles)
 
             # ===== IA DO NPC - BÁSICA =====
             # NPC AI - BASIC (pode ser refinada depois / can be refined later)
@@ -724,7 +755,10 @@ class Game:
             player_health=self.player.health,
             player_visible=self.npc_perception.last_seen_player_pos is not None,
             frames_since_last_seen=frames_since_seen,
-            difficulty=difficulty
+            difficulty=difficulty,
+            nearest_projectile_distance=self.npc_perception.nearest_projectile_distance,
+            nearest_projectile_angle=self.npc_perception.nearest_projectile_angle,
+            projectiles_nearby_count=self.npc_perception.projectiles_nearby_count,
         )
         
         # Atualiza expressão da carinha do NPC / Update NPC face expression
@@ -894,6 +928,9 @@ class Game:
                 # Prevent too-slow pursuit due to low multipliers; keep reasonable minimum
                 if speed_multiplier < 0.6:
                     speed_multiplier = 0.6
+                # Fairness: NPC should not move faster than the player's base movement speed
+                if speed_multiplier > 1.0:
+                    speed_multiplier = 1.0
 
                 if abs(target_y - self.npc.y) > 10:
                     direction = 1 if target_y > self.npc.y else -1
@@ -909,6 +946,8 @@ class Game:
         elif action_type == "wander":
             direction = params.get("direction", 1)
             speed = params.get("speed", 0.5)
+            if speed > 1.0:
+                speed = 1.0
             self.npc.move_y(direction * speed, dt)
 
         elif action_type == "random_rotate":
@@ -919,6 +958,27 @@ class Game:
         # Idle: fica parado
         elif action_type == "idle":
             pass
+
+        # Evade projectile: move rapidamente na direção indicada para escapar
+        elif action_type == "evade_projectile":
+            # params: direction (-1 up, 1 down), speed
+            direction = params.get("direction", 1)
+            speed = params.get("speed", 1.1)
+            # Evasão pode ser ágil, mas sem ultrapassar a velocidade base do tanque
+            if speed > 0.95:
+                speed = 0.95
+            # Se percepção de projéteis estiver disponível, pode ajustar direção inversamente
+            if hasattr(self.npc_perception, 'nearest_projectile_angle'):
+                ang = self.npc_perception.nearest_projectile_angle
+                # reforça direção para se afastar do projétil vindo de cima/baixo
+                if ang > 10:
+                    direction = -1
+                elif ang < -10:
+                    direction = 1
+
+            # aplica movimento de evasão (mais rápido que padrão)
+            self.npc.move_y(direction * max(0.9, speed), dt)
+            self.npc_perception.log_event("EVADE", f"dir={direction} sp={speed}")
 
 
 

@@ -18,6 +18,12 @@ class Problem:
     player_health: float  # Saúde do jogador (0-100)
     player_visible: bool  # Jogador está visível?
     frames_lost: int = 0  # Frames desde última visão
+    npc_x: float = 0.0  # Posição X do NPC (opcional)
+    npc_y: float = 0.0  # Posição Y do NPC (opcional)
+    # Campos de percepção de projéteis (não preditivos)
+    nearest_projectile_distance: float = float('inf')  # distância até projétil mais próximo
+    nearest_projectile_angle: float = 0.0  # ângulo relativo ao NPC até o projétil mais próximo
+    projectiles_nearby_count: int = 0  # número de projéteis num raio relevante
 
 
 @dataclass
@@ -73,6 +79,22 @@ class RBCEngine:
         #modo do RBC (INIT - COLD START OU RBC)
         self.mode = 'INIT'
         self.episode_count = 0
+        # Top-K selection para recuperação estocástica
+        self.top_k = 3
+
+        # Cold-start macro-actions
+        self.cold_start_episodes = 5
+        self.cold_macro = None  # estrutura: dict com target, behavior, ticks_remaining, fire_counter
+        # Cold macro duration (in frames). Reduced to ~0.25s–1.0s at 60fps.
+        # Use shorter macros: 0.10s–0.75s -> ~6–45 frames at 60fps
+        self.cold_macro_min_ticks = 6    # ~0.10s at 60fps
+        self.cold_macro_max_ticks = 45   # ~0.75s at 60fps
+        self.cold_macro_fire_interval = 30  # frames between fire attempts during macro
+
+        # Action persistence to avoid frame-to-frame jitter (in frames)
+        self.action_hold_frames = 0
+        self.action_hold_min = 6   # ~0.10s
+        self.action_hold_max = 45  # ~0.75s
 
 
 
@@ -104,6 +126,25 @@ class RBCEngine:
         else:
             return Solution("search", {})
 
+
+    def _start_new_cold_macro(self, problem: Problem) -> None:
+        import random
+        # escolhe alvo Y aleatório ao redor da posição atual do NPC
+        delta = random.uniform(-140, 140)
+        target_y = problem.npc_y + delta
+        # escolhe comportamento macro
+        behavior = random.choice(["move_and_fire", "move_only", "fire_only"])
+        ticks = random.randint(self.cold_macro_min_ticks, self.cold_macro_max_ticks)
+        fire_interval = random.choice([45, 60, 90])
+        self.cold_macro = {
+            "target_y": target_y,
+            "behavior": behavior,
+            "ticks_remaining": ticks,
+            "fire_interval": fire_interval,
+            "frame_index": 0,
+        }
+
+
     def decide_action(
         self,
         problem: Problem,
@@ -126,12 +167,58 @@ class RBCEngine:
 
         import random
 
-        #Aleatoriedade (Cold start - Como um carro, o óleo precisa esquentar para o RBC aprender)
-        if self.episode_count < 5:
+        # If we are holding an action to avoid jitter, return last solution
+        if getattr(self, 'action_hold_frames', 0) > 0 and self.last_solution is not None:
+            self.action_hold_frames -= 1
+            return self.last_solution
+
+        # Cold start: macro-ações estocásticas (motor babbling)
+        if self.episode_count < self.cold_start_episodes:
             self.mode = "COLD_START"
             if self.verbose:
-                print("[RBC] COLD START - comportamento aleatório")
-            solution = self._random_action(problem)
+                print("[RBC] COLD START - macro-actions")
+
+            # Inicializa macro se necessário
+            if not self.cold_macro or self.cold_macro.get("ticks_remaining", 0) <= 0:
+                self._start_new_cold_macro(problem)
+
+            macro = self.cold_macro
+            macro["ticks_remaining"] -= 1
+            macro["frame_index"] += 1
+
+            target_y = macro["target_y"]
+            behavior = macro["behavior"]
+            tol = 8.0
+
+            # Seção de movimento: use 'wander' para mover verticalmente
+            if behavior in ("move_and_fire", "move_only"):
+                if abs(problem.npc_y - target_y) > tol:
+                    direction = 1 if target_y > problem.npc_y else -1
+                    speed = 0.7 if behavior == "move_and_fire" else 0.5
+                    solution = Solution("wander", {"direction": direction, "speed": speed})
+                else:
+                    # chegou ao alvo — se for move_and_fire, decide atirar periodicamente
+                    if behavior == "move_and_fire":
+                        if macro["frame_index"] % macro["fire_interval"] == 0:
+                            solution = Solution("fire", {})
+                        else:
+                            solution = Solution("idle", {})
+                    else:
+                        solution = Solution("idle", {})
+
+            elif behavior == "fire_only":
+                # tenta atirar periodicamente sem mover
+                if macro["frame_index"] % macro["fire_interval"] == 0:
+                    solution = Solution("fire", {})
+                else:
+                    solution = Solution("idle", {})
+            else:
+                solution = self._random_action(problem)
+
+            # Finaliza macro se ticks esgotados
+            if macro["ticks_remaining"] <= 0:
+                self.cold_macro = None
+
             self.last_case_id = None
             self.last_problem = problem
             self.last_solution = solution
@@ -164,26 +251,23 @@ class RBCEngine:
         else:
             self.mode = "RBC"
 
-            best_score = -9999
-            best_case = None
-
-            for case in similar_cases:
-                similarity = case.get("similarity", 0)
-                avg_reward = case.get("avg_reward", 0.0)
-                usage_count = case.get("usage_count", 1)
-                
-                confidence = min(1.0, usage_count / 10.0)
-                score = similarity * avg_reward * (0.7 + 0.3 * confidence)
-
-                if score > best_score:
-                    best_score = score
-                    best_case = case
+            # Recupera Top-K casos por similaridade e escolhe o mais similar (DETERMINÍSTICO)
+            similar_cases_sorted = sorted(similar_cases, key=lambda c: c.get("similarity", 0.0), reverse=True)
+            chosen = similar_cases_sorted[0]  # Pega o caso com maior similaridade
 
             if self.verbose:
-                print(f"[RBC] EXPLOITANDO caso #{best_case['case_id'][:8]}")
+                print(f"[RBC] EXPLOITANDO (Determinístico) caso #{chosen['case_id'][:8]} (similaridade={chosen.get('similarity', 0):.3f})")
 
-            solution = self._adapt_solution(best_case, problem)
-            self.last_case_id = best_case["case_id"]
+            solution = self._adapt_solution(chosen, problem)
+            self.last_case_id = chosen["case_id"]
+
+        # quando escolhemos uma nova solução (RBC ou fallback), segura por alguns frames
+        try:
+            hold_min = max(1, int(self.action_hold_min))
+            hold_max = max(hold_min, int(self.action_hold_max))
+            self.action_hold_frames = random.randint(hold_min, hold_max)
+        except Exception:
+            self.action_hold_frames = 6
 
         self.last_problem = problem
         self.last_solution = solution
@@ -256,6 +340,9 @@ class RBCEngine:
             "player_id": self.player_id,
             "problem_distance": problem.distance,
             "problem_angle_diff": problem.angle_diff,
+            "problem_nearest_projectile_distance": getattr(problem, 'nearest_projectile_distance', float('inf')),
+            "problem_nearest_projectile_angle": getattr(problem, 'nearest_projectile_angle', 0.0),
+            "problem_projectiles_nearby_count": getattr(problem, 'projectiles_nearby_count', 0),
             "problem_npc_health": problem.npc_health,
             "problem_player_health": problem.player_health,
             "problem_player_visible": problem.player_visible,

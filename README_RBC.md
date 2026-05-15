@@ -11,7 +11,7 @@ jogo.py                    (Jogo principal)
 ├── npc_brain.py           (Interface de IA do NPC)
 │   └── rbc_engine.py      (Motor RBC: recuperação, adaptação, aprendizado)
 │       └── database.py    (Gerenciamento SQLite)
-│           └── seed_cases.py  (Casos iniciais para bootstrap)
+│           └── (seed cases handled internally by DB init)
 └── db_init.py            (Inicialização do banco)
 ```
 
@@ -54,17 +54,7 @@ Classe `NPCBrain`:
 - `report_outcome()`: Registra resultado para aprendizado
 - `get_statistics()`: Retorna estatísticas de aprendizado
 
-### `seed_cases.py`
-**Casos iniciais para bootstrap do sistema**
-
-7 casos pré-programados cobrindo cenários típicos:
-- Close range clear shot
-- Medium range pursuit
-- Long range pursuit
-- Target lost recently
-- Low health defensive
-- Easy mode tactics
-- Hard mode tactics
+<!-- seed_cases removed: initial cases are now handled internally by `db_init.py` / `CaseDatabase`. -->
 
 ### `db_init.py`
 **Utilitário de inicialização**
@@ -181,7 +171,7 @@ python jogo.py
 ```
 O sistema automaticamente:
 1. Verifica se BD existe
-2. Se vazio, carrega os 7 seed cases
+2. Se vazio, cria o esquema inicial do banco
 3. Começa o jogo
 
 ### Resetar Banco (opcional)
@@ -196,15 +186,31 @@ python db_init.py
 
 ## 🔧 Customização
 
-### Adicionar Novos Seed Cases
-Edite `seed_cases.py` e adicione à lista `SEED_CASES`:
+### Adicionar Casos Iniciais
+Para adicionar casos iniciais (seed) você pode:
+
+- Inserir diretamente no banco via um script Python que use `CaseDatabase.insert_case()`;
+- Ou estender `db_init.py` para popular casos quando o banco for criado.
+
+Exemplo rápido (inserir via script):
 
 ```python
-{
-    "case_id": "seed_custom",
-    "problem_distance": 200.0,
-    # ... outros campos
-}
+from database import CaseDatabase
+
+db = CaseDatabase('npc_cases.db')
+db.insert_case({
+    'case_id': 'seed_custom',
+    'problem_distance': 200.0,
+    'problem_angle_diff': 10.0,
+    'problem_npc_health': 100,
+    'problem_player_health': 100,
+    'problem_player_visible': True,
+    'solution_action': 'align_and_fire',
+    'solution_params': {},
+    'result_success': True,
+    'result_damage_dealt': 25,
+    'difficulty': 'Normal',
+})
 ```
 
 ### Ajustar Pesos de Similaridade

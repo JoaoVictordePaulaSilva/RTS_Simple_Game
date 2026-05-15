@@ -72,8 +72,8 @@ class RBCMonitorWindow:
 
         ttk.Label(main, text="RBC - Tempo Real", style="Title.TLabel").grid(row=0, column=0, columnspan=2, sticky="w")
 
-        self._status_var = tk.StringVar(value="Aguardando partida...")
-        status_label = ttk.Label(root, textvariable=self._status_var, style="Status.TLabel")
+        # Status label (avoid using StringVar to prevent cross-thread __del__ issues)
+        status_label = ttk.Label(root, text="Aguardando partida...", style="Status.TLabel")
         status_label.place(x=14, y=390)
 
         labels = [
@@ -85,11 +85,14 @@ class RBCMonitorWindow:
             "Conclusao",
         ]
 
-        self._value_vars = [tk.StringVar(value="-") for _ in labels]
+        # Create value labels and keep references so we can update via .config(text=...)
+        self._value_labels = []
 
         for idx, label in enumerate(labels):
             ttk.Label(main, text=label + ":", style="Body.TLabel").grid(row=idx + 1, column=0, sticky="w", pady=4)
-            ttk.Label(main, textvariable=self._value_vars[idx], style="Value.TLabel").grid(row=idx + 1, column=1, sticky="e", pady=4)
+            val_lbl = ttk.Label(main, text='-', style="Value.TLabel")
+            val_lbl.grid(row=idx + 1, column=1, sticky="e", pady=4)
+            self._value_labels.append(val_lbl)
 
         ttk.Label(main, text="Decisoes do RBC:", style="Body.TLabel").grid(row=7, column=0, columnspan=2, sticky="w", pady=(12, 4))
         self._decision_text = tk.Text(
@@ -164,22 +167,29 @@ class RBCMonitorWindow:
                     lang = payload.get("lang", "PT")
                     in_game = payload.get("in_game", False)
 
-                    self._value_vars[0].set(str(stats.get("total_cases", 0)))
-                    self._value_vars[1].set(str(stats.get("mode", "-")))
-                    self._value_vars[2].set(f"{stats.get('epsilon', 0):.3f}")
-                    self._value_vars[3].set(f"{stats.get('avg_reward', 0):.2f}")
-                    self._value_vars[4].set(f"{stats.get('avg_success_rate', 0):.1%}")
+                    # Update value labels safely
+                    try:
+                        self._value_labels[0].config(text=str(stats.get("total_cases", 0)))
+                        self._value_labels[1].config(text=str(stats.get("mode", "-")))
+                        self._value_labels[2].config(text=f"{stats.get('epsilon', 0):.3f}")
+                        self._value_labels[3].config(text=f"{stats.get('avg_reward', 0):.2f}")
+                        self._value_labels[4].config(text=f"{stats.get('avg_success_rate', 0):.1%}")
+                    except Exception:
+                        pass
 
                     if in_game:
-                        self._status_var.set("Partida em andamento..." if lang == "PT" else "Match in progress...")
+                        status_label.config(text=("Partida em andamento..." if lang == "PT" else "Match in progress..."))
                     else:
-                        self._status_var.set("Aguardando partida..." if lang == "PT" else "Waiting for match...")
+                        status_label.config(text=("Aguardando partida..." if lang == "PT" else "Waiting for match..."))
 
                 elif message_type == "conclusion":
                     lang = payload.get("lang", "PT")
                     conclusion = payload.get("conclusion", "-")
-                    self._value_vars[5].set(conclusion)
-                    self._status_var.set("Partida encerrada" if lang == "PT" else "Match ended")
+                    try:
+                        self._value_labels[5].config(text=conclusion)
+                        status_label.config(text=("Partida encerrada" if lang == "PT" else "Match ended"))
+                    except Exception:
+                        pass
 
                 elif message_type == "decision":
                     append_decision(payload)
