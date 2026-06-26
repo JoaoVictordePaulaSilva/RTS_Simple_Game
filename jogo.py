@@ -4,12 +4,15 @@ import sys
 import pygame
 import uuid
 import json
+import psutil
+import os
 
 from npc_brain import NPCBrain
 from rbc_engine import Solution
 from db_init import initialize_database
 from npc_face import NPCFace
 from rbc_monitor import RBCMonitorWindow
+from task_queue import AdaptiveTaskQueue, TaskPriority
 
 # Simples demo RTS com dois tanques (jogador + NPC)
 # Simple professional-but-small RTS-like demo with two tanks (player + NPC)
@@ -417,6 +420,14 @@ class Game:
         self.match_result_text = ""
         self.match_conclusion_sent = False
         self._decision_counter = 0
+        
+        # ===== FILA DE PRIORIDADES PARA DISTRIBUIR TAREFAS =====
+        self.task_queue = AdaptiveTaskQueue(
+            initial_tasks_per_frame=5,
+            cpu_threshold=0.70,
+            debug=False
+        )
+        self.process = psutil.Process(os.getpid())
 
     def setup_menu(self):
         center_x = SCREEN_WIDTH // 2
@@ -557,77 +568,149 @@ class Game:
         if go_to_menu:
             self.state = "menu"
 
+    def get_cpu_usage(self):
+        """Retorna uso de CPU do processo (0-1)."""
+        try:
+            return self.process.cpu_percent(interval=0.01) / 100.0
+        except:
+            return 0.0
+    
+    def _handle_player_input(self, dt):
+        """Entrada do jogador (CRÍTICA)."""
+        keys = pygame.key.get_pressed()
+        if keys[pygame.K_UP]:
+            self.player.move_y(-1, dt)
+        if keys[pygame.K_DOWN]:
+            self.player.move_y(1, dt)
+    
+    def _update_players_cooldown(self, dt):
+        """Atualiza cooldown de ambos os tanques (CRÍTICA)."""
+        self.player.update(dt)
+        self.npc.update(dt)
+    
+    def _update_npc_perception_and_ai(self, dt):
+        """Percepção e IA do NPC (ALTA prioridade)."""
+        self.npc_perception.update(self.player, dt, projectiles=self.projectiles)
+        self._update_npc_ai(dt)
+    
+    def _update_all_projectiles(self, dt):
+        """Atualiza todos os projéteis (MÉDIA prioridade)."""
+        for p in self.projectiles:
+            p.update(dt)
+    
+    def _check_all_collisions(self):
+        """Verifica colisões de projéteis com tanques (CRÍTICA)."""
+        for p in list(self.projectiles):
+            if not p.is_alive:
+                self.projectiles.remove(p)
+                continue
+            # Verifica colisão com tanques (ignora o dono)
+            if p.owner is not self.player and self._collide_proj_tank(p, self.player):
+                self.player.hit(p.damage)
+                p.is_alive = False
+                # NPC acertou: registro de aprendizado
+                self.npc_brain.report_outcome(
+                    success=True,
+                    damage_dealt=p.damage,
+                    damage_taken=0,
+                    outcome_type="hit",
+                    difficulty=self.options.get("difficulty", "Normal")
+                )
+                
+            if p.owner is not self.npc and self._collide_proj_tank(p, self.npc):
+                self.npc.hit(p.damage)
+                p.is_alive = False
+                # NPC recebeu dano
+                self.npc_brain.report_outcome(
+                    success=False,
+                    damage_dealt=0,
+                    damage_taken=p.damage,
+                    outcome_type="damaged",
+                    difficulty=self.options.get("difficulty", "Normal")
+                )
+        
+        # Remove projéteis mortos
+        self.projectiles = [p for p in self.projectiles if p.is_alive]
+    
+    def _update_game_state(self):
+        """Verifica condições de fim de jogo (CRÍTICA)."""
+        if self.player.health <= 0 or self.npc.health <= 0:
+            self.npc_brain.rbc_engine.end_episode()
+            self.match_result_text = self._build_match_result_text()
+            self.state = "gameover"
+    
+    def _update_rbc_monitor_periodic(self):
+        """Atualiza monitor RBC periodicamente (BAIXA prioridade)."""
+        if self._monitor_update_timer >= 0.2:
+            self._monitor_update_timer = 0.0
+            self._update_rbc_monitor(in_game=True)
+
     def update(self, dt):
         if self.state == "playing":
             self.frame_counter += 1
             self._monitor_update_timer += dt
             
-            keys = pygame.key.get_pressed()
-            # Movimento do jogador: apenas eixo Y / Player movement: only Y axis
-            if keys[pygame.K_UP]:
-                self.player.move_y(-1, dt)
-            if keys[pygame.K_DOWN]:
-                self.player.move_y(1, dt)
-            # Rotação do jogador desativada: somente movimento no eixo Y.
-
-            # Atualização de cooldown / Player cooldown update
-            self.player.update(dt)
-            self.npc.update(dt)
+            # ===== MONITORAR CPU E ADAPTAR FILA =====
+            cpu_usage = self.get_cpu_usage()
+            self.task_queue.update_cpu_usage(cpu_usage)
             
-            # Atualiza percepção do NPC / Update NPC perception (inclui projéteis)
-            self.npc_perception.update(self.player, dt, projectiles=self.projectiles)
-
-            # ===== IA DO NPC - BÁSICA =====
-            # NPC AI - BASIC (pode ser refinada depois / can be refined later)
-            self._update_npc_ai(dt)
-
-            # Atualiza projéteis / update projectiles
-            for p in self.projectiles:
-                p.update(dt)
-
-            # Colisões / collisions
-            for p in list(self.projectiles):
-                if not p.is_alive:
-                    self.projectiles.remove(p)
-                    continue
-                # Verifica colisão com tanques (ignora o dono) / check collision with tanks (skip owner)
-                if p.owner is not self.player and self._collide_proj_tank(p, self.player):
-                    self.player.hit(p.damage)
-                    p.is_alive = False
-                    # NPC acertou: registro de aprendizado
-                    self.npc_brain.report_outcome(
-                        success=True,
-                        damage_dealt=p.damage,
-                        damage_taken=0,
-                        outcome_type="hit",
-                        difficulty=self.options.get("difficulty", "Normal")
-                    )
-                    
-                if p.owner is not self.npc and self._collide_proj_tank(p, self.npc):
-                    self.npc.hit(p.damage)
-                    p.is_alive = False
-                    # NPC recebeu dano
-                    self.npc_brain.report_outcome(
-                        success=False,
-                        damage_dealt=0,
-                        damage_taken=p.damage,
-                        outcome_type="damaged",
-                        difficulty=self.options.get("difficulty", "Normal")
-                    )
-
-            # Remove projéteis mortos / remove dead projectiles
-            self.projectiles = [p for p in self.projectiles if p.is_alive]
-
-            # Verifica condições de fim de jogo / check end conditions
-            if self.player.health <= 0 or self.npc.health <= 0:
-                self.npc_brain.rbc_engine.end_episode()
-                self.match_result_text = self._build_match_result_text()
-                self.state = "gameover"
-
-            # Atualiza monitor RBC em tempo real sem sobrecarregar a UI auxiliar
-            if self._monitor_update_timer >= 0.2:
-                self._monitor_update_timer = 0.0
-                self._update_rbc_monitor(in_game=True)
+            # ===== ENFILEIRAR TAREFAS =====
+            
+            # 1. CRÍTICA: Input do jogador
+            self.task_queue.add(
+                func=self._handle_player_input,
+                args=(dt,),
+                priority=TaskPriority.CRITICAL,
+                name="player_input"
+            )
+            
+            # 2. CRÍTICA: Cooldown de ambos os tanques
+            self.task_queue.add(
+                func=self._update_players_cooldown,
+                args=(dt,),
+                priority=TaskPriority.CRITICAL,
+                name="players_cooldown"
+            )
+            
+            # 3. ALTA: Percepção e IA do NPC
+            self.task_queue.add(
+                func=self._update_npc_perception_and_ai,
+                args=(dt,),
+                priority=TaskPriority.HIGH,
+                name="npc_perception_ai"
+            )
+            
+            # 4. MÉDIA: Atualizar projéteis
+            self.task_queue.add(
+                func=self._update_all_projectiles,
+                args=(dt,),
+                priority=TaskPriority.MEDIUM,
+                name="update_projectiles"
+            )
+            
+            # 5. CRÍTICA: Colisões (afeta gameplay imediatamente)
+            self.task_queue.add(
+                func=self._check_all_collisions,
+                priority=TaskPriority.CRITICAL,
+                name="collision_check"
+            )
+            
+            # 6. CRÍTICA: Verificar fim de jogo
+            self.task_queue.add(
+                func=self._update_game_state,
+                priority=TaskPriority.CRITICAL,
+                name="game_state_check"
+            )
+            
+            # 7. BAIXA: Atualizar monitor RBC (pode esperar)
+            self.task_queue.add(
+                func=self._update_rbc_monitor_periodic,
+                priority=TaskPriority.LOW,
+                name="rbc_monitor_update"
+            )
+            
+            # ===== PROCESSA TODAS AS TAREFAS =====
+            self.task_queue.process_frame()
         elif self.state == "gameover":
             if not self.match_conclusion_sent:
                 self._update_rbc_monitor(in_game=False)
