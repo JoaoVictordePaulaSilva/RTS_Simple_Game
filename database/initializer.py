@@ -7,7 +7,7 @@ import sqlite3
 from datetime import datetime
 import os
 
-from database import CaseDatabase
+from .case_database import CaseDatabase
 
 
 def initialize_database(db_path: str = "npc_cases.db", force_reset: bool = False) -> CaseDatabase:

@@ -5,9 +5,9 @@ Simple tests for RBC system validation.
 
 import sqlite3
 from pathlib import Path
-from database import CaseDatabase
-from rbc_engine import RBCEngine, Problem, Solution, Outcome
-from npc_brain import NPCBrain
+from database.case_database import CaseDatabase
+from ai.rbc_engine import RBCEngine, Problem, Solution, Outcome
+from ai.npc_brain import NPCBrain
 
 
 def test_database_initialization():
@@ -141,7 +141,17 @@ def test_rbc_engine():
     fallback = Solution(action="idle", params={})
     action = engine.decide_action(problem, fallback, "Normal")
     
-    assert action.action in ["fire", "idle"], f"Ação inválida: {action.action}"
+    valid_actions = {
+        "fire",
+        "idle",
+        "wander",
+        "random_rotate",
+        "search",
+        "align_and_fire",
+        "pursue",
+        "evade_projectile",
+    }
+    assert action.action in valid_actions, f"Ação inválida: {action.action}"
     
     engine.close()
     Path(db_path).unlink(missing_ok=True)

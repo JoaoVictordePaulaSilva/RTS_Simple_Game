@@ -4,7 +4,7 @@ Test suite for TaskQueue validation
 """
 
 import time
-from task_queue import TaskQueue, AdaptiveTaskQueue, TaskPriority
+from utils.task_queue import TaskQueue, AdaptiveTaskQueue, TaskPriority
 
 
 def test_basic_queue():

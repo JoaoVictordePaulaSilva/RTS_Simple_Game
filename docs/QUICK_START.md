@@ -8,7 +8,7 @@
 | **TASK_QUEUE_README.md** | 📖 Documentação completa |
 | **INTEGRATION_GUIDE.md** | 🔧 Como integrar no jogo.py |
 | **test_task_queue.py** | ✅ Testes - valida que tudo funciona |
-| **task_queue_integration.py** | 💡 Exemplos práticos |
+| **docs/examples/task_queue_integration.py** | 💡 Exemplos práticos |
 
 ## 3 Passos para Começar
 
@@ -21,7 +21,7 @@ pip install psutil
 ### ✅ PASSO 2: Testar o Sistema (2 min)
 
 ```bash
-python test_task_queue.py
+python -m tests.test_task_queue
 ```
 
 Você verá:
@@ -41,7 +41,7 @@ Siga **INTEGRATION_GUIDE.md** passo a passo:
 ## Exemplo Mínimo (Copia e Cola)
 
 ```python
-from task_queue import AdaptiveTaskQueue, TaskPriority
+from utils.task_queue import AdaptiveTaskQueue, TaskPriority
 import psutil
 import os
 
@@ -124,7 +124,7 @@ FPS: Consistente
 
 **Não funciona?** Verifique:
 1. `pip list | grep psutil` (instalado?)
-2. `python test_task_queue.py` (testes passam?)
+2. `python -m tests.test_task_queue` (testes passam?)
 3. Debug: mude `debug=True` para ver logs
 
 **Muita latência?** Aumente:

@@ -31,7 +31,7 @@ pip install psutil  # Para monitoramento de CPU
 ### 2. Uso Básico
 
 ```python
-from task_queue import AdaptiveTaskQueue, TaskPriority
+from utils.task_queue import AdaptiveTaskQueue, TaskPriority
 
 # Inicializa
 task_queue = AdaptiveTaskQueue(
@@ -174,7 +174,7 @@ R: Em seu caso, você deve ver:
 
 1. Copie `task_queue.py` para seu projeto
 2. Instale: `pip install psutil`
-3. Adapte o loop do `jogo.py` seguindo exemplos em `task_queue_integration.py`
+3. Adapte o loop do `jogo.py` seguindo exemplos em `docs/examples/task_queue_integration.py`
 4. Teste com `debug=True` para entender o fluxo
 5. Ajuste `initial_tasks_per_frame` conforme necessário
 6. Considere: Pode ser útil para futuros NPCs também!

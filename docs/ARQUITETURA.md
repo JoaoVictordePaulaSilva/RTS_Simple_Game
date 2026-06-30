@@ -4,41 +4,34 @@
 
 ```
 d:\Projetos Facul\TCC\RTS em Pygames\
-├── jogo.py                 (Arquivo principal do jogo)
-├── database.py             (Gerenciamento SQLite)
-├── rbc_engine.py          (Motor de RBC)
-├── npc_brain.py           (Cérebro do NPC)
+├── main.py                (Novo ponto de entrada)
+├── jogo.py                (Compatibilidade/launcher legado)
+├── ai/                    (Camada de IA e RBC)
+├── database/              (Persistência SQLite)
+├── game/                  (Loop principal e entidades do jogo)
+├── utils/                 (Ferramentas auxiliares)
 ├── db_init.py             (Inicialização do BD)
-├── test_rbc.py            (Testes unitários)
+├── tests/                 (Testes unitários RBC e TaskQueue)
 ├── npc_cases.db           (Banco de dados SQLite - criado automaticamente)
-├── requirements.txt       (Dependências Python)
-├── README.md              (README original)
 ├── README_RBC.md          (Documentação do RBC)
-└── ARQUITETURA.md         (Este arquivo)
+└── docs/ARQUITETURA.md    (Este arquivo)
 ```
 
 ## 📋 Descrição de Cada Arquivo
 
-### `jogo.py` (820+ linhas)
+### `main.py`
 **Arquivo principal do jogo**
 
-Classes principais:
-- `Tank`: Representa um tanque (jogador ou NPC)
-- `Projectile`: Representa um projétil
-- `NPCPerception`: Percepção sensorial do NPC
-- `Button`: Botão da interface
+Classe principal:
 - `Game`: Classe principal que orquestra tudo
 
-Modificações para RBC:
-- Import dos módulos: `npc_brain`, `db_init`
-- Inicializa `NPCBrain` no `__init__`
-- Chama `npc_brain.decide_action()` em `_update_npc_ai()`
-- Reporta resultados em colisões via `npc_brain.report_outcome()`
-- Exibe estatísticas RBC na tela de game over
+Modificações para a nova estrutura:
+- Usa `game.game.Game`
+- Mantém a inicialização centralizada no pacote `game`
 
 ---
 
-### `database.py` (~230 linhas)
+### `database/`
 **Gerenciamento de persistência em SQLite**
 
 Classe principal:
@@ -74,8 +67,8 @@ game_sessions (session_id, start_time, end_time, difficulty,
 
 ---
 
-### `rbc_engine.py` (~200 linhas)
-**Motor de Raciocínio Baseado em Casos**
+### `ai/`
+**Motor de RBC e cérebro do NPC**
 
 Dataclasses:
 - `Problem`: Estado do jogo (distance, angle_diff, healths, visibility)
@@ -84,15 +77,14 @@ Dataclasses:
 
 Classe principal:
 - `RBCEngine`: Motor RBC
+- `NPCBrain`: Interface entre jogo e RBC
 
 Métodos públicos:
 - `decide_action(problem, fallback, difficulty)`: Recupera e adapta
 - `learn(case_id, problem, solution, outcome, session_id, difficulty)`: Aprende
+- `report_outcome(success, damage_dealt, damage_taken, ...)`: Registra resultado
 - `get_statistics()`: Retorna stats
 - `close()`: Fecha BD
-
-Métodos privados:
-- `_adapt_solution(case, new_problem)`: Adapta solução anterior
 
 Fluxo:
 1. Recupera casos similares do BD
@@ -102,45 +94,40 @@ Fluxo:
 
 ---
 
-### `npc_brain.py` (~220 linhas)
-**Cérebro do NPC - Interface entre jogo e RBC**
+### `game/`
+**Loop principal, entidades e interface do jogo**
 
-Classe principal:
-- `NPCBrain`: Interface de decisão do NPC
+Componentes principais:
+- `game.game.Game`
+- `game.entities.Tank`
+- `game.entities.Projectile`
+- `game.perception.NPCPerception`
+- `game.ui.button.Button`
+- `game.ui.npc_face.NPCFace`
 
-Métodos públicos:
-- `decide_action(npc_x, npc_y, ..., difficulty)`: Decide ação via RBC
-- `report_outcome(success, damage_dealt, damage_taken, ...)`: Registra resultado
-- `set_session(session_id)`: Define sessão atual
-- `get_statistics()`: Retorna stats
-- `close()`: Fecha conexões
-
-Métodos privados:
-- `_encode_problem()`: Codifica estado do jogo como Problem
-- `_generate_fallback_action()`: IA básica hardcoded
-  - `player_not_visible`: search
-  - `close_clear_shot`: fire
-  - `medium_range`: align_and_fire
-  - `long_range`: pursue
-  - default: idle
-
-Tipos de ações:
-| Ação | Código |
-|------|--------|
-| fire | "fire" |
-| align_and_fire | "align_and_fire" |
-| pursue | "pursue" |
-| search | "search" |
-| idle | "idle" |
+Responsabilidades:
+- Estado principal do jogo
+- IA do NPC em `_update_npc_ai()`
+- Colisões e aprendizado em `report_outcome()`
+- Interface, menus e telas de fim de jogo
 
 ---
 
-<!-- seed_cases removed: bootstrapping is now handled internally by the DB initialization. -->
+### `utils/`
+**Ferramentas auxiliares**
+
+Componentes:
+- `utils.task_queue`
+- `utils.rbc_monitor`
+
+Responsabilidades:
+- Priorização e distribuição de tarefas por frame
+- Monitoramento de estatísticas do RBC
 
 ---
 
-### `db_init.py` (~60 linhas)
-**Inicialização e utilitários do BD**
+### `db_init.py`
+**Utilitário de inicialização**
 
 Funções:
 - `initialize_database(db_path, force_reset)`: Cria BD com seed cases
@@ -148,13 +135,13 @@ Funções:
 
 Uso:
 ```bash
-python db_init.py                 # Inicializa se vazio
-python db_init.py --force-reset   # Reseta tudo (opcional)
+python db_init.py
+python db_init.py --force-reset
 ```
 
 ---
 
-### `test_rbc.py` (~200 linhas)
+### `test_rbc.py`
 **Suite de testes unitários**
 
 Testes:
@@ -171,6 +158,18 @@ RESULTADOS: 5 passou(ram), 0 falhou/falharam
 
 ---
 
+### `test_task_queue.py`
+**Suite de testes da fila de tarefas**
+
+Valida:
+- Prioridades
+- Adaptabilidade
+- Performance
+- Estatísticas
+- Tarefas críticas nunca adiadas
+
+---
+
 ### `npc_cases.db` (Banco de Dados)
 **Banco SQLite criado automaticamente**
 
@@ -181,13 +180,6 @@ Contém:
 
 Tamanho inicial: ~20 KB
 Cresce ~10 KB por jogo (dependendo de duração)
-
----
-
-### `requirements.txt`
-```
-pygame==2.5.0
-```
 
 ---
 
@@ -207,13 +199,11 @@ Seções:
 - Customização
 - Métricas coletadas
 
----
-
 ## 🔄 Fluxo de Dados
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│ JOGO (jogo.py)                                          │
+│ JOGO (game/game.py)                                     │
 │ ┌───────────────────────────────────────────────────┐  │
 │ │ update() → _update_npc_ai()                       │  │
 │ └───────────────────────────────────────────────────┘  │
@@ -222,7 +212,7 @@ Seções:
                ├─ codifica estado
                │
 ┌──────────────▼──────────────────────────────────────────┐
-│ NPC_BRAIN (npc_brain.py)                                │
+│ NPC_BRAIN (ai/npc_brain.py)                            │
 │ ┌───────────────────────────────────────────────────┐  │
 │ │ decide_action()                                  │  │
 │ │   └─ Problem(distance, angle, health...)        │  │
@@ -230,7 +220,7 @@ Seções:
 └──────────────┬──────────────────────────────────────────┘
                │
 ┌──────────────▼──────────────────────────────────────────┐
-│ RBC_ENGINE (rbc_engine.py)                              │
+│ RBC_ENGINE (ai/rbc_engine.py)                           │
 │ ┌───────────────────────────────────────────────────┐  │
 │ │ decide_action()                                  │  │
 │ │   ├─ recupera casos similares                   │  │
@@ -240,7 +230,7 @@ Seções:
 └──────────────┬──────────────────────────────────────────┘
                │
 ┌──────────────▼──────────────────────────────────────────┐
-│ DATABASE (database.py)                                  │
+│ DATABASE (database/case_database.py)                    │
 │ ┌───────────────────────────────────────────────────┐  │
 │ │ get_similar_cases()                              │  │
 │ │   ├─ SELECT * FROM rbc_cases                    │  │
@@ -252,92 +242,17 @@ Seções:
 ┌──────────────▼──────────────────────────────────────────┐
 │ SQLITE (npc_cases.db)                                   │
 │ ┌───────────────────────────────────────────────────┐  │
-│ │ Armazena: 7 seed cases + casos aprendidos       │  │
+│ │ Armazena: seed cases + casos aprendidos         │  │
 │ └───────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────┘
 
                     APRENDIZADO (feedback)
-
-┌─────────────────────────────────────────────────────────┐
-│ JOGO (colisão/evento)                                   │
-│   npc_brain.report_outcome(success, damage, type)     │
-└──────────────┬──────────────────────────────────────────┘
-               │
-┌──────────────▼──────────────────────────────────────────┐
-│ RBC_ENGINE                                              │
-│   learn(case_id, problem, solution, outcome)          │
-└──────────────┬──────────────────────────────────────────┘
-               │
-┌──────────────▼──────────────────────────────────────────┐
-│ DATABASE                                                │
-│   insert_case(new_case_data)                          │
-│   update_case_usage(case_id, success)                 │
-└──────────────┬──────────────────────────────────────────┘
-               │
-┌──────────────▼──────────────────────────────────────────┐
-│ SQLITE                                                  │
-│   INSERT INTO rbc_cases VALUES (...)                  │
-│   UPDATE rbc_cases SET usage_count, success_rate      │
-└─────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 🎯 Princípios de Design
+## 🎯 Próximos Passos
 
-### 1. **Separação de Responsabilidades**
-- `database.py`: Apenas I/O com BD
-- `rbc_engine.py`: Apenas lógica RBC
-- `npc_brain.py`: Apenas interface com jogo
-- `jogo.py`: Apenas renderização e eventos
-
-### 2. **Clean Code**
-- ✅ Type hints em tudo
-- ✅ Docstrings bilíngues
-- ✅ Nomes descritivos
-- ✅ Funções pequenas e focadas
-- ✅ DRY (Don't Repeat Yourself)
-
-### 3. **Extensibilidade**
-- Fácil adicionar novos tipos de ações
-- Fácil modificar cálculo de similaridade
-- Fácil adicionar novos seed cases
-
-### 4. **Testabilidade**
-- Cada classe testável isoladamente
-- `test_rbc.py` cobre funcionalidades principais
-- BD isolado (não interfere com jogo)
-
----
-
-## 📊 Estatísticas Coletadas
-
-Cada caso armazena:
-- **Problema**: distance, angle_diff, healths, visibility
-- **Solução**: action_type, parameters
-- **Resultado**: success, damage_dealt, damage_taken, outcome_type
-- **Metadados**: timestamp, session_id, difficulty, usage_count, success_rate
-
-Queries úteis:
-```sql
--- Ações mais bem-sucedidas
-SELECT action, AVG(success_rate) FROM rbc_cases GROUP BY action;
-
--- Casos mais usados
-SELECT case_id, usage_count FROM rbc_cases ORDER BY usage_count DESC;
-
--- Aprendizado por dificuldade
-SELECT difficulty, COUNT(*) FROM rbc_cases WHERE created_by='learned' GROUP BY difficulty;
-```
-
----
-
-## 🚀 Próximos Passos
-
-1. **Análise de Dados**: Extrair insights do BD
-2. **Visualização**: Gráficos de evolução
-3. **Otimização**: Melhorar similaridade
-4. **Expansão**: Mais ações e contextos
-5. **Comparação**: RBC vs IA tradicional
-6. **Documentação**: Relatório final TCC
-
+- Expandir métricas de aprendizagem
+- Criar gráficos de evolução do NPC
+- Separar exemplos de integração em arquivos menores dentro de `docs/`

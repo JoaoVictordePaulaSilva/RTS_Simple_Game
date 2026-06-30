@@ -3,7 +3,7 @@ Exemplo de Integração da TaskQueue no jogo.
 Integration example of TaskQueue in the game loop.
 """
 
-from task_queue import TaskQueue, AdaptiveTaskQueue, TaskPriority
+from utils.task_queue import TaskQueue, AdaptiveTaskQueue, TaskPriority
 import psutil
 import os
 
@@ -159,7 +159,7 @@ class GameLoopWithTaskQueue:
 
 INTEGRATION_CODE = """
 # Adicionar no topo de jogo.py:
-from task_queue import AdaptiveTaskQueue, TaskPriority
+from utils.task_queue import AdaptiveTaskQueue, TaskPriority
 import psutil
 import os
 

@@ -29,7 +29,7 @@ class CaseDatabase:
         CREATE TABLE IF NOT EXISTS rbc_cases (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             case_id TEXT UNIQUE NOT NULL,
-            player_id TEXT, 
+            player_id TEXT,
 
             -- PROBLEM
             problem_distance REAL NOT NULL,
@@ -257,7 +257,6 @@ class CaseDatabase:
     # ==========================================================
 
     def _calculate_similarity(self, problem: Dict, case: Dict) -> float:
-
         distance_diff = abs(problem.get("distance", 0) - case["problem_distance"])
         angle_diff = abs(problem.get("angle_diff", 0) - case["problem_angle_diff"])
         health_diff = abs(problem.get("npc_health", 100) - case["problem_npc_health"])
@@ -267,7 +266,7 @@ class CaseDatabase:
         angle_similarity = max(0, 1 - (angle_diff / 180))
         health_similarity = max(0, 1 - (health_diff / 100))
         visibility_match = (
-            1.0 if problem.get("player_visible") == bool(case["problem_player_visible"]) 
+            1.0 if problem.get("player_visible") == bool(case["problem_player_visible"])
             else 0.3
         )
 

@@ -1,0 +1,106 @@
+"""Shared constants and localized strings for the RTS game."""
+
+SCREEN_WIDTH = 900
+SCREEN_HEIGHT = 600
+FPS = 60
+
+ARENA_TOP = 100
+LOG_HEIGHT = 120
+ARENA_BOTTOM = SCREEN_HEIGHT - LOG_HEIGHT - 20
+ARENA_LEFT = 80
+ARENA_RIGHT = 820
+
+STRINGS = {
+    "PT": {
+        "title": "joguinho",
+        "start_game": "Iniciar Jogo",
+        "options": "Opções",
+        "language": "Idioma",
+        "quit": "Sair",
+        "difficulty": "Dificuldade",
+        "easy": "Fácil",
+        "normal": "Normal",
+        "hard": "Difícil",
+        "projectile_speed": "Velocidade do Projétil:",
+        "speed_label": "Vel. Projétil:",
+        "esc_menu": "Pressione ESC para voltar",
+        "hint_controls": "Use setas para mover/rotacionar. Espaço para disparar.",
+        "player": "Jogador",
+        "enemy": "Inimigo",
+        "npc_perception": "Percepção NPC:",
+        "npc_log_title": "LOG NPC",
+        "seeing": "VENDO: Jogador em",
+        "lost": "STATUS: Alvo Perdido",
+        "game_over": "Fim de Jogo",
+        "player_wins": "Jogador Vence",
+        "enemy_wins": "Inimigo Vence",
+        "draw": "Empate",
+        "you_win": "Voce venceu",
+        "you_lose": "Voce perdeu",
+        "press_enter": "Pressione ENTER para voltar",
+        "waiting_events": "Aguardando eventos...",
+        "login_title": "Entrar no jogo",
+        "login_subtitle": "Defina seu nome de jogador para continuar",
+        "player_name_label": "Nome do jogador",
+        "player_name_placeholder": "joguinho",
+        "login_confirm": "ENTER para confirmar",
+        "login_back": "ESC para voltar",
+        "change_user": "Trocar usuário",
+        "logged_as": "Logado como",
+        "difficulty_in_use": "Dificuldade em uso",
+        "difficulty_locked": "Normal (fixa)",
+        "back_menu": "Voltar ao menu",
+    },
+    "EN": {
+        "title": "joguinho",
+        "start_game": "Start Game",
+        "options": "Options",
+        "language": "Language",
+        "quit": "Quit",
+        "difficulty": "Difficulty",
+        "easy": "Easy",
+        "normal": "Normal",
+        "hard": "Hard",
+        "projectile_speed": "Projectile speed:",
+        "speed_label": "Projectile speed:",
+        "esc_menu": "Press ESC to return to menu",
+        "hint_controls": "Use arrows to move/rotate in-game. Space to fire.",
+        "player": "Player",
+        "enemy": "Enemy",
+        "npc_perception": "NPC Perception:",
+        "npc_log_title": "NPC LOG",
+        "seeing": "SEEING: Player at",
+        "lost": "STATUS: Lost target",
+        "game_over": "Game Over",
+        "player_wins": "Player Wins",
+        "enemy_wins": "Enemy Wins",
+        "draw": "Draw",
+        "you_win": "You won",
+        "you_lose": "You lost",
+        "press_enter": "Press Enter to return to menu",
+        "waiting_events": "Waiting for events...",
+        "login_title": "Sign in",
+        "login_subtitle": "Set your player name to continue",
+        "player_name_label": "Player name",
+        "player_name_placeholder": "joguinho",
+        "login_confirm": "Press ENTER to confirm",
+        "login_back": "Press ESC to return",
+        "change_user": "Change user",
+        "logged_as": "Logged as",
+        "difficulty_in_use": "Difficulty in use",
+        "difficulty_locked": "Normal (locked)",
+        "back_menu": "Back to menu",
+    }
+}
+
+__all__ = [
+    "SCREEN_WIDTH",
+    "SCREEN_HEIGHT",
+    "FPS",
+    "ARENA_TOP",
+    "LOG_HEIGHT",
+    "ARENA_BOTTOM",
+    "ARENA_LEFT",
+    "ARENA_RIGHT",
+    "STRINGS",
+]

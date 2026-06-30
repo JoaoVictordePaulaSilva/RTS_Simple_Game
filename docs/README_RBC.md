@@ -7,17 +7,16 @@ Sistema de IA para NPC em jogo RTS implementando **RBC (Raciocínio Baseado em C
 ## 🏗️ Arquitetura
 
 ```
-jogo.py                    (Jogo principal)
-├── npc_brain.py           (Interface de IA do NPC)
-│   └── rbc_engine.py      (Motor RBC: recuperação, adaptação, aprendizado)
-│       └── database.py    (Gerenciamento SQLite)
-│           └── (seed cases handled internally by DB init)
-└── db_init.py            (Inicialização do banco)
+main.py                    (Novo ponto de entrada)
+├── game/                  (Loop principal do jogo)
+├── ai/                    (Interface de IA do NPC e motor RBC)
+├── database/              (Gerenciamento SQLite)
+└── db_init.py             (Inicialização do banco)
 ```
 
 ## 📁 Descrição dos Arquivos
 
-### `database.py`
+### `database/`
 **Gerenciamento de persistência em SQLite**
 
 - Classe `CaseDatabase`: Interface para operações no BD
@@ -31,7 +30,7 @@ jogo.py                    (Jogo principal)
 - `rbc_cases`: Armazena casos (problema + solução + resultado)
 - `game_sessions`: Metadados de sessões de jogo
 
-### `rbc_engine.py`
+### `ai/rbc_engine.py`
 **Motor de Raciocínio Baseado em Casos**
 
 Classes:
@@ -44,7 +43,7 @@ Classe `RBCEngine`:
 - `_adapt_solution()`: Adapta solução de caso anterior ao novo problema
 - `learn()`: Armazena novo caso no banco
 
-### `npc_brain.py`
+### `ai/npc_brain.py`
 **Cérebro do NPC integrando RBC e IA básica**
 
 Classe `NPCBrain`:
@@ -85,7 +84,7 @@ Classe `NPCBrain`:
 ## 📊 Tipos de Ações Disponíveis
 
 | Ação | Descrição | Parâmetros |
-|------|-----------|-----------|
+|------|-----------|------------|
 | `fire` | Dispara na direção atual | `angle_adjustment` |
 | `align_and_fire` | Alinha antes de disparar | `target_angle`, `speed` |
 | `pursue` | Persegue o jogador | `speed`, `rotate` |
@@ -130,7 +129,7 @@ Intervalo: [0.0, 1.0] onde 1.0 = caso idêntico
 
 1. **Inicialização** (`__init__`):
 ```python
-from npc_brain import NPCBrain
+from ai.npc_brain import NPCBrain
 self.npc_brain = NPCBrain("npc_cases.db")
 ```
 
@@ -195,7 +194,7 @@ Para adicionar casos iniciais (seed) você pode:
 Exemplo rápido (inserir via script):
 
 ```python
-from database import CaseDatabase
+from database.case_database import CaseDatabase
 
 db = CaseDatabase('npc_cases.db')
 db.insert_case({
@@ -214,7 +213,7 @@ db.insert_case({
 ```
 
 ### Ajustar Pesos de Similaridade
-Em `database.py`, função `_calculate_similarity()`:
+Em `database/case_database.py`, função `_calculate_similarity()`:
 
 ```python
 weights = {
@@ -226,7 +225,7 @@ weights = {
 ```
 
 ### Adicionar Novas Ações
-1. Defina em `npc_brain.py`, método `_generate_fallback_action()`
+1. Defina em `ai/npc_brain.py`, método `_generate_fallback_action()`
 2. Implemente execução em `_execute_npc_action()`
 
 ## 📈 Métricas Coletadas
@@ -258,5 +257,3 @@ O banco automaticamente rastreia:
 6. **Multiplayer**: Sincronizar BD entre sessões
 
 ## 📝 Licença
-
-Projeto académico - TCC
