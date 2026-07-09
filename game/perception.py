@@ -34,6 +34,8 @@ class NPCPerception:
 		if dist > self.vision_range:
 			return False
 
+		# Ângulo mantido como referência geométrica do cone de visão.
+		# No gameplay atual, as entidades ainda não usam rotação funcional.
 		angle_to_target = math.degrees(math.atan2(dy, dx))
 		angle_diff = abs(angle_to_target - self.tank.angle)
 		if angle_diff > 180:

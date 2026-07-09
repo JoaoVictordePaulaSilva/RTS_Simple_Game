@@ -139,14 +139,13 @@ class NPCBrain:
 		player_visible: bool, frames_since_last_seen: int,
 		nearest_projectile_distance: float = None, nearest_projectile_angle: float = None, projectiles_nearby_count: int = 0
 	) -> Problem:
-		dx = player_x - npc_x
+		# A métrica principal de proximidade pode ser a distância vertical.
 		dy = player_y - npc_y
-		distance = math.sqrt(dx * dx + dy * dy)
+		distance = abs(dy)
 
-		angle_to_target = math.degrees(math.atan2(dy, dx))
-		angle_diff = abs(angle_to_target - npc_angle)
-		if angle_diff > 180:
-			angle_diff = 360 - angle_diff
+		# Ângulo mantido apenas para compatibilidade com o schema e debug.
+		# As entidades ainda não usam rotação real no fluxo atual do jogo.
+		angle_diff = 0.0
 
 		return Problem(
 			distance=distance,
@@ -171,23 +170,25 @@ class NPCBrain:
 			return Solution(action="evade_projectile", params={"direction": direction, "speed": 0.9})
 
 		if problem.player_visible:
-			if problem.angle_diff < 10:
+			# Sem rotação efetiva, a decisão usa principalmente a distância vertical.
+			if problem.distance < 20:
 				if random.random() < 0.8:
 					return Solution(action="fire", params={})
 				return Solution(action="wander", params={"direction": random.choice([-1, 1]), "speed": 0.6})
-			elif problem.angle_diff < 30:
+			elif problem.distance < 60:
 				r = random.random()
 				if r < 0.6:
 					return Solution(action="align_and_fire", params={})
 				elif r < 0.8:
 					return Solution(action="fire", params={})
 				return Solution(action="pursue", params={"speed": random.uniform(0.5, 1.0)})
-			elif problem.angle_diff < 90:
+			elif problem.distance < 140:
 				r = random.random()
 				if r < 0.5:
 					return Solution(action="align_and_fire", params={})
 				elif r < 0.7:
-					return Solution(action="random_rotate", params={"direction": 1 if problem.angle_diff > 0 else -1})
+					# Nome legado; hoje esta ação representa uma varredura vertical.
+					return Solution(action="random_rotate", params={"direction": 1 if problem.distance > 0 else -1})
 				return Solution(action="pursue", params={"speed": random.uniform(0.6, 0.9)})
 			return Solution(action="random_rotate", params={"direction": random.choice([-1, 1])})
 
@@ -242,15 +243,17 @@ class NPCBrain:
 		elif outcome_type == "safe":
 			reward += 1.0
 
+		# O jogo atual não depende de alinhamento angular real.
+		# A recompensa passa a privilegiar a proximidade vertical e a distância útil de tiro.
 		if solution.action in ["fire", "align_and_fire"]:
-			if problem.angle_diff < 15:
+			if problem.distance < 20:
 				reward += 5.0
-			elif problem.angle_diff < 30:
+			elif problem.distance < 60:
 				reward += 2.0
 
-			if 200 <= problem.distance <= 400:
+			if 80 <= problem.distance <= 180:
 				reward += 3.0
-			elif problem.distance < 100:
+			elif problem.distance < 35:
 				reward -= 2.0
 
 		if solution.action == "idle":

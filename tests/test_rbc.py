@@ -75,7 +75,7 @@ def test_similarity_calculation():
     # Insere caso de referência
     case = {
         "problem_distance": 100.0,
-        "problem_angle_diff": 10.0,
+        "problem_angle_diff": 0.0,
         "problem_npc_health": 100.0,
         "problem_player_health": 100.0,
         "problem_player_visible": True,
@@ -85,7 +85,7 @@ def test_similarity_calculation():
     sim = db._calculate_similarity(case, {
         **case,
         "problem_distance": 100.0,
-        "problem_angle_diff": 10.0,
+        "problem_angle_diff": 0.0,
     })
     assert sim > 0.7, f"Similaridade deveria ser alta, obteve {sim}"
     
@@ -93,7 +93,7 @@ def test_similarity_calculation():
     sim = db._calculate_similarity(case, {
         **case,
         "problem_distance": 500.0,
-        "problem_angle_diff": 90.0,
+        "problem_angle_diff": 0.0,
     })
     assert sim < 0.6, f"Similaridade deveria ser baixa, obteve {sim}"
     
@@ -132,7 +132,7 @@ def test_rbc_engine():
     
     problem = Problem(
         distance=105.0,
-        angle_diff=16.0,
+        angle_diff=0.0,
         npc_health=95.0,
         player_health=95.0,
         player_visible=True
