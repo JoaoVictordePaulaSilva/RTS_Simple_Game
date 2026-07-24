@@ -1,7 +1,7 @@
 """RBC data models used by the NPC AI."""
 
 from dataclasses import dataclass
-from typing import Dict
+from typing import Dict, List, Optional
 
 
 @dataclass
@@ -20,6 +20,13 @@ class Problem:
 	projectiles_nearby_count: int = 0
 	projectile_threat_active: bool = False
 	projectile_threat_distance: float = float('inf')
+	edge_distance_top: float = float('inf')
+	edge_distance_bottom: float = float('inf')
+	nearest_edge_distance: float = float('inf')
+	border_pressure: float = 0.0
+	border_side: int = 0
+	closing_speed: float = 0.0
+	recent_actions: Optional[List[str]] = None
 
 
 @dataclass

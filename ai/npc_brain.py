@@ -10,6 +10,9 @@ from typing import Dict, Optional, Tuple
 from .rbc_engine import RBCEngine
 from .rbc_models import Problem, Solution, Outcome
 
+ARENA_TOP = 100
+ARENA_BOTTOM = 480
+
 
 class NPCBrain:
 	"""
@@ -151,6 +154,22 @@ class NPCBrain:
 		# A métrica principal de proximidade pode ser a distância vertical.
 		dy = player_y - npc_y
 		distance = abs(dy)
+		previous_problem = getattr(self.rbc_engine, "last_problem", None)
+		closing_speed = 0.0
+		if previous_problem is not None:
+			closing_speed = previous_problem.distance - distance
+
+		edge_distance_top = max(0.0, npc_y - ARENA_TOP)
+		edge_distance_bottom = max(0.0, ARENA_BOTTOM - npc_y)
+		nearest_edge_distance = min(edge_distance_top, edge_distance_bottom)
+		border_pressure = max(0.0, min(1.0, 1.0 - (nearest_edge_distance / 120.0)))
+		if edge_distance_top < edge_distance_bottom:
+			border_side = -1
+		elif edge_distance_bottom < edge_distance_top:
+			border_side = 1
+		else:
+			border_side = 0
+		recent_actions = list(self.action_history[-4:]) if self.action_history else []
 
 		# Ângulo mantido apenas para compatibilidade com o schema e debug.
 		# As entidades ainda não usam rotação real no fluxo atual do jogo.
@@ -170,10 +189,29 @@ class NPCBrain:
 			projectiles_nearby_count=projectiles_nearby_count,
 			projectile_threat_active=projectile_threat_active,
 			projectile_threat_distance=projectile_threat_distance if projectile_threat_distance is not None else float('inf'),
+			edge_distance_top=edge_distance_top,
+			edge_distance_bottom=edge_distance_bottom,
+			nearest_edge_distance=nearest_edge_distance,
+			border_pressure=border_pressure,
+			border_side=border_side,
+			closing_speed=closing_speed,
+			recent_actions=recent_actions,
 		)
 
 	def _generate_fallback_action(self, problem: Problem) -> Solution:
 		import random
+
+		border_pressure = getattr(problem, 'border_pressure', 0.0)
+		border_side = getattr(problem, 'border_side', 0)
+		edge_escape_direction = 1 if border_side < 0 else -1 if border_side > 0 else random.choice([-1, 1])
+		near_border = getattr(problem, 'nearest_edge_distance', float('inf')) <= 80 or border_pressure >= 0.55
+
+		if near_border and self.evade_cooldown_remaining <= 0:
+			if problem.player_visible and problem.distance < 40 and random.random() < 0.4:
+				return Solution(action="fire", params={})
+			if problem.player_visible and problem.distance < 80 and random.random() < 0.35:
+				return Solution(action="pursue", params={"speed": 0.85})
+			return Solution(action="wander", params={"direction": edge_escape_direction, "speed": 0.85})
 
 		projectile_threat_active = getattr(problem, 'projectile_threat_active', False)
 		projectile_threat_distance = getattr(problem, 'projectile_threat_distance', float('inf'))
@@ -275,6 +313,30 @@ class NPCBrain:
 
 		if problem.player_visible:
 			reward += 2.0
+
+		border_pressure = getattr(problem, "border_pressure", 0.0)
+		border_side = getattr(problem, "border_side", 0)
+		edge_distance = getattr(problem, "nearest_edge_distance", float("inf"))
+		if border_pressure > 0:
+			away_direction = 1 if border_side < 0 else -1 if border_side > 0 else 0
+			move_direction = None
+			if isinstance(solution.params, dict):
+				move_direction = solution.params.get("direction")
+
+			if solution.action in ("wander", "search"):
+				if move_direction == away_direction and away_direction != 0:
+					reward += 4.0 * border_pressure
+				else:
+					reward -= 4.0 * border_pressure
+			elif solution.action == "pursue":
+				if edge_distance <= 80:
+					reward += 2.0 * border_pressure
+				else:
+					reward += 0.5
+			elif solution.action == "evade_projectile":
+				reward += 1.5 * border_pressure
+			elif solution.action in ("idle", "random_rotate"):
+				reward -= 5.0 * border_pressure
 
 		player_defeated = damage_dealt >= 100 or outcome_type == "player_dead"
 		if player_defeated:

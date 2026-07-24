@@ -95,7 +95,7 @@ def test_similarity_calculation():
         "problem_distance": 500.0,
         "problem_angle_diff": 0.0,
     })
-    assert sim < 0.6, f"Similaridade deveria ser baixa, obteve {sim}"
+    assert sim < 0.7, f"Similaridade deveria ser baixa, obteve {sim}"
     
     db.close()
     Path(db_path).unlink(missing_ok=True)
@@ -233,6 +233,45 @@ def test_evade_requires_real_threat():
     print("  ✓ Evade exige ameaça real")
 
 
+def test_problem_encoding_includes_border_and_closing_speed():
+    """Testa que o estado RBC carrega borda, direção e aproximação."""
+    print("✓ Testando encoding de borda e closing speed...")
+
+    db_path = "test_npc_cases_border.db"
+    Path(db_path).unlink(missing_ok=True)
+
+    brain = NPCBrain(db_path)
+    brain.action_history = ["wander", "search", "fire"]
+    brain.rbc_engine.last_problem = Problem(
+        distance=160.0,
+        angle_diff=0.0,
+        npc_health=100,
+        player_health=100,
+        player_visible=True,
+    )
+
+    problem = brain._encode_problem(
+        npc_x=400, npc_y=110, npc_angle=0, npc_health=100,
+        player_x=500, player_y=200, player_health=100,
+        player_visible=True, frames_since_last_seen=0,
+        nearest_projectile_distance=150,
+        nearest_projectile_angle=10,
+        projectiles_nearby_count=1,
+        projectile_threat_active=False,
+        projectile_threat_distance=150,
+    )
+
+    assert problem.nearest_edge_distance < float("inf")
+    assert problem.border_pressure > 0.0, "Deveria registrar pressão de borda"
+    assert problem.border_side == -1, "NPC perto do topo deveria marcar side superior"
+    assert problem.closing_speed == 70.0, "Closing speed deveria refletir aproximação ao player"
+    assert problem.recent_actions == ["wander", "search", "fire"], "Histórico curto de ações deveria ser salvo"
+
+    brain.close()
+    Path(db_path).unlink(missing_ok=True)
+    print("  ✓ Encoding inclui borda, histórico e closing speed")
+
+
 def run_all_tests():
     """Executa todos os testes."""
     print("\n" + "="*50)
@@ -246,6 +285,7 @@ def run_all_tests():
         test_rbc_engine,
         test_npc_brain,
         test_evade_requires_real_threat,
+        test_problem_encoding_includes_border_and_closing_speed,
     ]
     
     passed = 0

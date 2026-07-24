@@ -76,24 +76,39 @@ class CaseDatabase:
             cursor.execute("ALTER TABLE rbc_cases ADD COLUMN problem_nearest_projectile_angle REAL DEFAULT 0.0")
         if 'problem_projectiles_nearby_count' not in existing_cols:
             cursor.execute("ALTER TABLE rbc_cases ADD COLUMN problem_projectiles_nearby_count INTEGER DEFAULT 0")
+        if 'problem_edge_distance_top' not in existing_cols:
+            cursor.execute("ALTER TABLE rbc_cases ADD COLUMN problem_edge_distance_top REAL DEFAULT 999999")
+        if 'problem_edge_distance_bottom' not in existing_cols:
+            cursor.execute("ALTER TABLE rbc_cases ADD COLUMN problem_edge_distance_bottom REAL DEFAULT 999999")
+        if 'problem_nearest_edge_distance' not in existing_cols:
+            cursor.execute("ALTER TABLE rbc_cases ADD COLUMN problem_nearest_edge_distance REAL DEFAULT 999999")
+        if 'problem_border_pressure' not in existing_cols:
+            cursor.execute("ALTER TABLE rbc_cases ADD COLUMN problem_border_pressure REAL DEFAULT 0.0")
+        if 'problem_border_side' not in existing_cols:
+            cursor.execute("ALTER TABLE rbc_cases ADD COLUMN problem_border_side INTEGER DEFAULT 0")
+        if 'problem_closing_speed' not in existing_cols:
+            cursor.execute("ALTER TABLE rbc_cases ADD COLUMN problem_closing_speed REAL DEFAULT 0.0")
+        if 'problem_recent_actions' not in existing_cols:
+            cursor.execute("ALTER TABLE rbc_cases ADD COLUMN problem_recent_actions TEXT DEFAULT '[]'")
 
         self.connection.commit()
 
         # Pesos de similaridade configuráveis (podem ser ajustados para tuning)
         # Soma aproximada deve ser 1.0 para manter interpretação consistente
         self.similarity_weights = {
-            "distance": 0.30,
-            "angle": 0.12,
-            "health": 0.12,
-            "visibility": 0.12,
+            "distance": 0.26,
+            "angle": 0.10,
+            "health": 0.10,
+            "visibility": 0.10,
             "proj_dist": 0.08,
             "proj_angle": 0.04,
             "proj_count": 0.04,
+            "border": 0.08,
             # Novos componentes
-            "age": 0.06,
-            "outcome": 0.06,
-            "action_history": 0.03,
-            "closing_speed": 0.03,
+            "age": 0.05,
+            "outcome": 0.07,
+            "action_history": 0.04,
+            "closing_speed": 0.04,
         }
 
     # ==========================================================
@@ -126,6 +141,8 @@ class CaseDatabase:
                 player_id,
                 problem_distance, problem_angle_diff,
                 problem_nearest_projectile_distance, problem_nearest_projectile_angle, problem_projectiles_nearby_count,
+                problem_edge_distance_top, problem_edge_distance_bottom, problem_nearest_edge_distance,
+                problem_border_pressure, problem_border_side, problem_closing_speed, problem_recent_actions,
                 problem_npc_health, problem_player_health, problem_player_visible,
                 problem_frames_lost,
                 solution_action, solution_params,
@@ -134,7 +151,7 @@ class CaseDatabase:
                 usage_count, success_count, success_rate,
                 total_reward, avg_reward
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             case_id,
             case_data.get("player_id", "unknown"),
@@ -143,6 +160,13 @@ class CaseDatabase:
             case_data.get("problem_nearest_projectile_distance", 999999),
             case_data.get("problem_nearest_projectile_angle", 0.0),
             case_data.get("problem_projectiles_nearby_count", 0),
+            case_data.get("problem_edge_distance_top", 999999),
+            case_data.get("problem_edge_distance_bottom", 999999),
+            case_data.get("problem_nearest_edge_distance", 999999),
+            case_data.get("problem_border_pressure", 0.0),
+            case_data.get("problem_border_side", 0),
+            case_data.get("problem_closing_speed", 0.0),
+            json.dumps(case_data.get("problem_recent_actions", [])),
             case_data.get("problem_npc_health", 100),
             case_data.get("problem_player_health", 100),
             1 if case_data.get("problem_player_visible") else 0,
@@ -260,6 +284,7 @@ class CaseDatabase:
         distance_diff = abs(problem.get("distance", 0) - case["problem_distance"])
         angle_diff = abs(problem.get("angle_diff", 0) - case["problem_angle_diff"])
         health_diff = abs(problem.get("npc_health", 100) - case["problem_npc_health"])
+        border_pressure_diff = abs(problem.get("border_pressure", 0.0) - (case.get("problem_border_pressure", 0.0) or 0.0))
 
         # Similaridade básica para distância/ângulo/vida/visibilidade
         dist_similarity = max(0, 1 - (distance_diff / 800))
@@ -293,6 +318,19 @@ class CaseDatabase:
         # Similaridade por count (normalizado em 0..5)
         proj_count_similarity = max(0, 1 - (abs(p_count - c_count) / 5))
 
+        p_border_side = problem.get("border_side", 0)
+        c_border_side = case.get("problem_border_side", 0) or 0
+        p_edge = problem.get("nearest_edge_distance", float('inf'))
+        c_edge = case.get("problem_nearest_edge_distance", 999999)
+        if (p_edge == float('inf') or p_edge >= 999999) and (c_edge is None or c_edge >= 999999):
+            edge_similarity = 1.0
+        elif p_edge == float('inf') or p_edge >= 999999 or c_edge is None or c_edge >= 999999:
+            edge_similarity = 0.0
+        else:
+            edge_similarity = max(0, 1 - (abs(p_edge - c_edge) / 120))
+        if p_border_side != 0 and c_border_side != 0 and p_border_side == c_border_side:
+            edge_similarity = min(1.0, edge_similarity + 0.1)
+
         # Componentes novos: idade do caso, estatísticas de outcome, histórico de ações, velocidade de aproximação
 
         # --- Age / temporalidade ---
@@ -325,7 +363,9 @@ class CaseDatabase:
         action_history_similarity = 0.5
         try:
             p_hist = problem.get("recent_actions") or []
-            c_hist = case.get("recent_actions") or []
+            c_hist = case.get("problem_recent_actions") or case.get("recent_actions") or []
+            if isinstance(c_hist, str):
+                c_hist = json.loads(c_hist)
             if p_hist and c_hist:
                 set_p = set(p_hist)
                 set_c = set(c_hist)
@@ -361,6 +401,7 @@ class CaseDatabase:
             proj_dist_similarity * weights.get("proj_dist", 0.0) +
             proj_angle_similarity * weights.get("proj_angle", 0.0) +
             proj_count_similarity * weights.get("proj_count", 0.0) +
+            edge_similarity * weights.get("border", 0.0) +
             age_similarity * weights.get("age", 0.0) +
             outcome_similarity * weights.get("outcome", 0.0) +
             action_history_similarity * weights.get("action_history", 0.0) +
