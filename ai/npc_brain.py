@@ -35,6 +35,8 @@ class NPCBrain:
 		self.stuck_threshold_frames = 45
 		self.stuck_position_tolerance = 50.0
 		self.ineffectiveness_boost_base = 0.1
+		self.evade_cooldown_frames = 18
+		self.evade_cooldown_remaining = 0
 
 	def set_session(self, session_id: str) -> None:
 		self.session_id = session_id
@@ -109,13 +111,19 @@ class NPCBrain:
 		nearest_projectile_distance: float = None,
 		nearest_projectile_angle: float = None,
 		projectiles_nearby_count: int = 0,
+		projectile_threat_active: bool = False,
+		projectile_threat_distance: float = None,
 	):
 		problem = self._encode_problem(
 			npc_x, npc_y, npc_angle, npc_health,
 			player_x, player_y, player_health,
 			player_visible, frames_since_last_seen,
-			nearest_projectile_distance, nearest_projectile_angle, projectiles_nearby_count
+			nearest_projectile_distance, nearest_projectile_angle, projectiles_nearby_count,
+			projectile_threat_active, projectile_threat_distance
 		)
+
+		if self.evade_cooldown_remaining > 0:
+			self.evade_cooldown_remaining -= 1
 
 		fallback_solution = self._generate_fallback_action(problem)
 		solution = self.rbc_engine.decide_action(problem, fallback_solution, difficulty)
@@ -137,7 +145,8 @@ class NPCBrain:
 		npc_x: float, npc_y: float, npc_angle: float, npc_health: float,
 		player_x: float, player_y: float, player_health: float,
 		player_visible: bool, frames_since_last_seen: int,
-		nearest_projectile_distance: float = None, nearest_projectile_angle: float = None, projectiles_nearby_count: int = 0
+		nearest_projectile_distance: float = None, nearest_projectile_angle: float = None, projectiles_nearby_count: int = 0,
+		projectile_threat_active: bool = False, projectile_threat_distance: float = None
 	) -> Problem:
 		# A métrica principal de proximidade pode ser a distância vertical.
 		dy = player_y - npc_y
@@ -159,14 +168,19 @@ class NPCBrain:
 			nearest_projectile_distance=nearest_projectile_distance if nearest_projectile_distance is not None else float('inf'),
 			nearest_projectile_angle=nearest_projectile_angle if nearest_projectile_angle is not None else 0.0,
 			projectiles_nearby_count=projectiles_nearby_count,
+			projectile_threat_active=projectile_threat_active,
+			projectile_threat_distance=projectile_threat_distance if projectile_threat_distance is not None else float('inf'),
 		)
 
 	def _generate_fallback_action(self, problem: Problem) -> Solution:
 		import random
 
-		if getattr(problem, 'projectiles_nearby_count', 0) > 0:
+		projectile_threat_active = getattr(problem, 'projectile_threat_active', False)
+		projectile_threat_distance = getattr(problem, 'projectile_threat_distance', float('inf'))
+		if projectile_threat_active and projectile_threat_distance <= 280 and self.evade_cooldown_remaining <= 0:
 			ang = getattr(problem, 'nearest_projectile_angle', 0.0)
 			direction = -1 if ang > 0 else 1
+			self.evade_cooldown_remaining = self.evade_cooldown_frames
 			return Solution(action="evade_projectile", params={"direction": direction, "speed": 0.9})
 
 		if problem.player_visible:

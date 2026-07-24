@@ -1,7 +1,12 @@
 # RTS Tanks - Sistema de IA com Raciocínio Baseado em Casos
 
 <p align="center">
-  <img src="https://skillicons.dev/icons?i=python,sqlite,git,md" alt="Tecnologias Utilizadas" />
+   <img src="https://skillicons.dev/icons?i=python,sqlite,git" alt="Tecnologias Utilizadas" />
+</p>
+
+<p align="center">
+   <img src="https://img.shields.io/badge/Pygame-1E1E1E?style=for-the-badge&logo=pygame&logoColor=white" alt="Pygame" />
+   <img src="https://img.shields.io/badge/Psutil-3776AB?style=for-the-badge&logo=psutil&logoColor=white" alt="Psutil" />
 </p>
 
 ## Visão Geral do Projeto
@@ -34,12 +39,12 @@ graph TD
     DB -->|Consultas Ponderadas| SQL[(npc_cases.db <br> SQLite)]
     
     %% Estilização do Diagrama
-    style MAIN fill:#f9f9f9,stroke:#333,stroke-width:2px
-    style ENGINE fill:#e1f5fe,stroke:#0288d1,stroke-width:2px
-    style QUEUE fill:#fff3e0,stroke:#f57c00,stroke-width:2px
-    style CRIT fill:#ffebee,stroke:#c62828,stroke-width:1px
-    style DEFER fill:#e8f5e9,stroke:#2e7d32,stroke-width:1px
-    style SQL fill:#ede7f6,stroke:#4527a0,stroke-width:2px
+   style MAIN fill:#1f2937,stroke:#94a3b8,stroke-width:2px,color:#f8fafc
+   style ENGINE fill:#0f4c81,stroke:#7dd3fc,stroke-width:2px,color:#f8fafc
+   style QUEUE fill:#7c2d12,stroke:#fdba74,stroke-width:2px,color:#fff7ed
+   style CRIT fill:#4c1d1d,stroke:#fca5a5,stroke-width:2px,color:#fff1f2
+   style DEFER fill:#1f3d2b,stroke:#86efac,stroke-width:2px,color:#f0fdf4
+   style SQL fill:#312e81,stroke:#c4b5fd,stroke-width:2px,color:#f5f3ff
 ```
 
 ---

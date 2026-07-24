@@ -18,6 +18,8 @@ class Problem:
 	nearest_projectile_distance: float = float('inf')
 	nearest_projectile_angle: float = 0.0
 	projectiles_nearby_count: int = 0
+	projectile_threat_active: bool = False
+	projectile_threat_distance: float = float('inf')
 
 
 @dataclass

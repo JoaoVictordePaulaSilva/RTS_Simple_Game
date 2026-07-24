@@ -25,6 +25,10 @@ class NPCPerception:
 		self.nearest_projectile_distance = float('inf')
 		self.nearest_projectile_angle = 0.0
 		self.projectiles_nearby_count = 0
+		self.projectile_threat_active = False
+		self.projectile_threat_distance = float('inf')
+		self.projectile_threat_distance_limit = 340
+		self.projectile_threat_angle_limit = 28
 
 	def can_see(self, other_tank):
 		dx = other_tank.x - self.tank.x
@@ -80,12 +84,18 @@ class NPCPerception:
 		self.nearest_projectile_distance = float('inf')
 		self.nearest_projectile_angle = 0.0
 		self.projectiles_nearby_count = 0
+		self.projectile_threat_active = False
+		self.projectile_threat_distance = float('inf')
 		if projectiles:
 			nx, ny = self.tank.x, self.tank.y
 			for p in projectiles:
 				dx = p.x - nx
 				dy = p.y - ny
 				dist = math.hypot(dx, dy)
+				angle_to_npc = math.degrees(math.atan2(ny - p.y, nx - p.x))
+				heading_diff = abs(p.angle - angle_to_npc)
+				if heading_diff > 180:
+					heading_diff = 360 - heading_diff
 				if dist < self.nearest_projectile_distance:
 					self.nearest_projectile_distance = dist
 					ang = math.degrees(math.atan2(dy, dx))
@@ -95,6 +105,10 @@ class NPCPerception:
 					if rel_ang < -180:
 						rel_ang += 360
 					self.nearest_projectile_angle = rel_ang
+				if dist <= self.projectile_threat_distance_limit and heading_diff <= self.projectile_threat_angle_limit:
+					if dist < self.projectile_threat_distance:
+						self.projectile_threat_active = True
+						self.projectile_threat_distance = dist
 				if dist <= 300:
 					self.projectiles_nearby_count += 1
 

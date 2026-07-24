@@ -26,7 +26,7 @@ class RBCEngine:
 		self.last_problem: Optional[Problem] = None
 		self.last_solution: Optional[Solution] = None
 
-		self.epsilon = 0.6
+		self.epsilon = 0.25
 		self.epsilon_min = 0.05
 		self.epsilon_decay = 0.85
 
@@ -43,8 +43,10 @@ class RBCEngine:
 		self.cold_macro_fire_interval = 30
 
 		self.action_hold_frames = 0
-		self.action_hold_min = 6
-		self.action_hold_max = 45
+		self.action_hold_min = 8
+		self.action_hold_max = 24
+		self.explore_hold_min = 2
+		self.explore_hold_max = 8
 
 	def set_player(self, player_id: str):
 		self.player_id = player_id
@@ -128,9 +130,14 @@ class RBCEngine:
 			self.last_solution = solution
 			return solution
 
-		explore = random.random() < self.epsilon
-
 		similar_cases = self.db.get_similar_cases(asdict(problem), threshold=0.5, limit=5, difficulty=difficulty)
+		best_similarity = max((case.get("similarity", 0.0) for case in similar_cases), default=0.0)
+		effective_epsilon = self.epsilon
+		if best_similarity >= 0.8:
+			effective_epsilon *= 0.5
+		elif best_similarity >= 0.65:
+			effective_epsilon *= 0.75
+		explore = random.random() < effective_epsilon
 
 		if explore or not similar_cases:
 			self.mode = "RANDOM"
@@ -154,11 +161,15 @@ class RBCEngine:
 			self.last_case_id = chosen["case_id"]
 
 		try:
-			hold_min = max(1, int(self.action_hold_min))
-			hold_max = max(hold_min, int(self.action_hold_max))
+			if explore or not similar_cases:
+				hold_min = max(1, int(self.explore_hold_min))
+				hold_max = max(hold_min, int(self.explore_hold_max))
+			else:
+				hold_min = max(1, int(self.action_hold_min))
+				hold_max = max(hold_min, int(self.action_hold_max))
 			self.action_hold_frames = random.randint(hold_min, hold_max)
 		except Exception:
-			self.action_hold_frames = 6
+			self.action_hold_frames = 4
 
 		self.last_problem = problem
 		self.last_solution = solution

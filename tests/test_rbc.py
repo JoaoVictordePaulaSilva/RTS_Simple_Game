@@ -193,6 +193,46 @@ def test_npc_brain():
     print("  ✓ Cérebro do NPC funciona corretamente")
 
 
+def test_evade_requires_real_threat():
+    """Testa que o evade depende de ameaça real de projétil."""
+    print("✓ Testando evade condicionado à ameaça real...")
+
+    db_path = "test_npc_cases_evade.db"
+    Path(db_path).unlink(missing_ok=True)
+
+    brain = NPCBrain(db_path)
+
+    safe_problem = brain._encode_problem(
+        npc_x=400, npc_y=300, npc_angle=0, npc_health=100,
+        player_x=500, player_y=300, player_health=100,
+        player_visible=True, frames_since_last_seen=0,
+        nearest_projectile_distance=120,
+        nearest_projectile_angle=15,
+        projectiles_nearby_count=1,
+        projectile_threat_active=False,
+        projectile_threat_distance=120,
+    )
+    safe_action = brain._generate_fallback_action(safe_problem)
+    assert safe_action.action != "evade_projectile", "Não deveria evadir sem ameaça real"
+
+    threat_problem = brain._encode_problem(
+        npc_x=400, npc_y=300, npc_angle=0, npc_health=100,
+        player_x=500, player_y=300, player_health=100,
+        player_visible=True, frames_since_last_seen=0,
+        nearest_projectile_distance=120,
+        nearest_projectile_angle=15,
+        projectiles_nearby_count=1,
+        projectile_threat_active=True,
+        projectile_threat_distance=120,
+    )
+    threat_action = brain._generate_fallback_action(threat_problem)
+    assert threat_action.action == "evade_projectile", "Deveria evadir com ameaça real"
+
+    brain.close()
+    Path(db_path).unlink(missing_ok=True)
+    print("  ✓ Evade exige ameaça real")
+
+
 def run_all_tests():
     """Executa todos os testes."""
     print("\n" + "="*50)
@@ -205,6 +245,7 @@ def run_all_tests():
         test_similarity_calculation,
         test_rbc_engine,
         test_npc_brain,
+        test_evade_requires_real_threat,
     ]
     
     passed = 0

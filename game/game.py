@@ -350,6 +350,8 @@ class Game:
 			nearest_projectile_distance=self.npc_perception.nearest_projectile_distance,
 			nearest_projectile_angle=self.npc_perception.nearest_projectile_angle,
 			projectiles_nearby_count=self.npc_perception.projectiles_nearby_count,
+			projectile_threat_active=self.npc_perception.projectile_threat_active,
+			projectile_threat_distance=self.npc_perception.projectile_threat_distance,
 		)
 
 		can_see = self.npc_perception.last_seen_player_pos is not None
@@ -480,6 +482,8 @@ class Game:
 			pass
 
 		elif action_type == "evade_projectile":
+			if not getattr(self.npc_perception, 'projectile_threat_active', False):
+				return
 			direction = params.get("direction", 1)
 			speed = params.get("speed", 1.1)
 			if speed > 0.95:
