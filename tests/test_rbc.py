@@ -8,6 +8,7 @@ from pathlib import Path
 from database.case_database import CaseDatabase
 from ai.rbc_engine import RBCEngine, Problem, Solution, Outcome
 from ai.npc_brain import NPCBrain
+from utils.action_guards import should_auto_fire_in_cold_start
 
 
 def test_database_initialization():
@@ -233,6 +234,18 @@ def test_evade_requires_real_threat():
     print("  ✓ Evade exige ameaça real")
 
 
+def test_alignment_auto_fire_is_cold_start_only():
+    """Testa que o auto-disparo por alinhamento só vale no cold start."""
+    print("✓ Testando auto-disparo de alinhamento por modo...")
+
+    assert should_auto_fire_in_cold_start("COLD_START", 120, 8, 900, 12)
+    assert not should_auto_fire_in_cold_start("RBC", 120, 8, 900, 12)
+    assert not should_auto_fire_in_cold_start("RANDOM", 120, 8, 900, 12)
+    assert not should_auto_fire_in_cold_start("COLD_START", 120, 20, 900, 12)
+
+    print("  ✓ Auto-disparo fica restrito ao cold start")
+
+
 def test_problem_encoding_includes_border_and_closing_speed():
     """Testa que o estado RBC carrega borda, direção e aproximação."""
     print("✓ Testando encoding de borda e closing speed...")
@@ -285,6 +298,7 @@ def run_all_tests():
         test_rbc_engine,
         test_npc_brain,
         test_evade_requires_real_threat,
+        test_alignment_auto_fire_is_cold_start_only,
         test_problem_encoding_includes_border_and_closing_speed,
     ]
     

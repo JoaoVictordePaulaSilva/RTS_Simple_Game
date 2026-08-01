@@ -14,6 +14,7 @@ from .constants import SCREEN_WIDTH, SCREEN_HEIGHT, FPS, ARENA_TOP, LOG_HEIGHT, 
 from .entities import Tank, Projectile
 from .perception import NPCPerception
 from .ui import Button, NPCFace
+from utils.action_guards import should_auto_fire_in_cold_start
 from utils.rbc_monitor import RBCMonitorWindow
 from utils.task_queue import AdaptiveTaskQueue, TaskPriority
 
@@ -406,11 +407,12 @@ class Game:
 			p_ang_diff = abs(p_angle - self.npc.angle)
 			if p_ang_diff > 180:
 				p_ang_diff = 360 - p_ang_diff
+			mode = self.npc_brain.rbc_engine.mode
 
 			subcone_angle = 12
 			subcone_range = min(self.npc_perception.vision_range, 900)
 
-			if p_dist <= subcone_range and p_ang_diff <= subcone_angle:
+			if should_auto_fire_in_cold_start(mode, p_dist, p_ang_diff, subcone_range, subcone_angle):
 				if self.npc.can_fire():
 					self.npc.fire()
 					fire_angle = self.npc.angle
