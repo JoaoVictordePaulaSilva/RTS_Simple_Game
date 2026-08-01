@@ -130,7 +130,7 @@ class RBCEngine:
 			self.last_solution = solution
 			return solution
 
-		similar_cases = self.db.get_similar_cases(asdict(problem), threshold=0.5, limit=5, difficulty=difficulty)
+		similar_cases = self.db.get_similar_cases(asdict(problem), threshold=0.45, limit=10, difficulty=difficulty)
 		best_similarity = max((case.get("similarity", 0.0) for case in similar_cases), default=0.0)
 		effective_epsilon = self.epsilon
 		if best_similarity >= 0.8:
@@ -139,26 +139,29 @@ class RBCEngine:
 			effective_epsilon *= 0.75
 		explore = random.random() < effective_epsilon
 
-		if explore or not similar_cases:
+		if not similar_cases:
 			self.mode = "RANDOM"
 			solution = fallback_solution
 			self.last_case_id = None
-
 			if self.verbose:
-				if explore and similar_cases:
-					print(f"[RBC] EXPLORANDO (epsilon={self.epsilon:.3f})")
-				elif not similar_cases:
-					print("[RBC] Sem casos similares - EXPLORANDO")
-		else:
-			self.mode = "RBC"
-			similar_cases_sorted = sorted(similar_cases, key=lambda c: c.get("similarity", 0.0), reverse=True)
-			chosen = similar_cases_sorted[0]
-
-			if self.verbose:
-				print(f"[RBC] EXPLOITANDO (Determinístico) caso #{chosen['case_id'][:8]} (similaridade={chosen.get('similarity', 0):.3f})")
-
+				print("[RBC] Sem casos similares - Fallback ativado")
+		elif explore:
+			self.mode = "EXPLORE"
+			# Escolhe aleatoriamente um dos Top 3 melhores casos
+			top_k = similar_cases[:min(3, len(similar_cases))]
+			chosen = random.choice(top_k)
 			solution = self._adapt_solution(chosen, problem)
 			self.last_case_id = chosen["case_id"]
+			if self.verbose:
+				print(f"[RBC] EXPLORANDO (Top 3) caso #{chosen['case_id'][:8]} (sim={chosen.get('similarity', 0):.3f})")
+		else:
+			self.mode = "EXPLOIT"
+			# Escolhe o melhor caso (Top 1)
+			chosen = similar_cases[0]
+			solution = self._adapt_solution(chosen, problem)
+			self.last_case_id = chosen["case_id"]
+			if self.verbose:
+				print(f"[RBC] EXPLOITANDO (Top 1) caso #{chosen['case_id'][:8]} (sim={chosen.get('similarity', 0):.3f})")
 
 		try:
 			if explore or not similar_cases:
@@ -206,6 +209,14 @@ class RBCEngine:
 		if case_id:
 			self.db.update_case_usage(case_id=case_id, success=outcome.success, reward=outcome.reward)
 			return
+
+		# Filtro de idle redundante:
+		# Permite salvar a primeira transição para idle (ex: parada estratégica/cooldown),
+		# mas descarta salvamentos de idles contínuos idênticos sem evento relevante.
+		if solution.action == "idle" and outcome.outcome_type not in ("hit", "damaged", "miss"):
+			recent = getattr(problem, 'recent_actions', []) or []
+			if len(recent) >= 2 and recent[-1] == "idle" and recent[-2] == "idle":
+				return
 
 		new_case = {
 			"player_id": self.player_id,

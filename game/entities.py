@@ -65,7 +65,7 @@ class Tank:
 
 
 class Projectile:
-	def __init__(self, x, y, angle, owner, speed=420, damage=25, color=None):
+	def __init__(self, x, y, angle, owner, speed=420, damage=25, color=None, origin_problem=None, origin_solution=None, origin_case_id=None):
 		self.x = x
 		self.y = y
 		self.angle = angle
@@ -75,6 +75,9 @@ class Projectile:
 		self.radius = 6
 		self.is_alive = True
 		self.color = color if color else owner.color
+		self.origin_problem = origin_problem
+		self.origin_solution = origin_solution
+		self.origin_case_id = origin_case_id
 
 	def update(self, dt):
 		rad = math.radians(self.angle)

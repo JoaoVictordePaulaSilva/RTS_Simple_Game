@@ -224,8 +224,21 @@ class Game:
 	def _check_all_collisions(self):
 		for p in list(self.projectiles):
 			if not p.is_alive:
+				if p.owner is self.npc and getattr(p, 'origin_problem', None) is not None:
+					self.npc_brain.report_outcome(
+						success=False,
+						damage_dealt=0,
+						damage_taken=0,
+						outcome_type="miss",
+						difficulty=self.options.get("difficulty", "Normal"),
+						problem_override=p.origin_problem,
+						solution_override=p.origin_solution,
+						case_id_override=p.origin_case_id
+					)
+					p.origin_problem = None
 				self.projectiles.remove(p)
 				continue
+
 			if p.owner is not self.player and self._collide_proj_tank(p, self.player):
 				self.player.hit(p.damage)
 				p.is_alive = False
@@ -234,8 +247,12 @@ class Game:
 					damage_dealt=p.damage,
 					damage_taken=0,
 					outcome_type="hit",
-					difficulty=self.options.get("difficulty", "Normal")
+					difficulty=self.options.get("difficulty", "Normal"),
+					problem_override=getattr(p, 'origin_problem', None),
+					solution_override=getattr(p, 'origin_solution', None),
+					case_id_override=getattr(p, 'origin_case_id', None)
 				)
+				p.origin_problem = None
 
 			if p.owner is not self.npc and self._collide_proj_tank(p, self.npc):
 				self.npc.hit(p.damage)
@@ -389,6 +406,25 @@ class Game:
 			line = f"#{self._decision_counter:04d} {readable_reason} [action={action.action} params={params_text}]"
 			self.rbc_monitor.push_decision({"group_key": f"{mode}:{action.action}", "compact_text": compact_text, "full_text": line})
 
+	def _create_npc_projectile(self, fire_angle: float) -> Projectile:
+		origin_prob = None
+		origin_sol = None
+		origin_case_id = None
+		if self.npc_brain.pending_outcome:
+			origin_prob, origin_sol = self.npc_brain.pending_outcome
+			origin_case_id = self.npc_brain.rbc_engine.last_case_id
+
+		return Projectile(
+			self.npc.x + math.cos(math.radians(fire_angle)) * 40,
+			self.npc.y + math.sin(math.radians(fire_angle)) * 40,
+			fire_angle,
+			self.npc,
+			speed=self.options.get("projectile_speed", 420),
+			origin_problem=origin_prob,
+			origin_solution=origin_sol,
+			origin_case_id=origin_case_id
+		)
+
 	def _execute_npc_action(self, action: Solution, dt: float) -> None:
 		action_type = action.action
 		if isinstance(action.params, str):
@@ -409,14 +445,14 @@ class Game:
 				p_ang_diff = 360 - p_ang_diff
 			mode = self.npc_brain.rbc_engine.mode
 
-			subcone_angle = 12
+			subcone_angle = self.npc_perception.subcone_angle
 			subcone_range = min(self.npc_perception.vision_range, 900)
 
 			if should_auto_fire_in_cold_start(mode, p_dist, p_ang_diff, subcone_range, subcone_angle):
 				if self.npc.can_fire():
 					self.npc.fire()
 					fire_angle = self.npc.angle
-					proj = Projectile(self.npc.x + math.cos(math.radians(fire_angle)) * 40, self.npc.y + math.sin(math.radians(fire_angle)) * 40, fire_angle, self.npc, speed=self.options.get("projectile_speed", 420))
+					proj = self._create_npc_projectile(fire_angle)
 					self.projectiles.append(proj)
 					self.npc_perception.log_event("FIRE", f"subcone {int(fire_angle)}°")
 					if self.debug_mode:
@@ -433,7 +469,7 @@ class Game:
 				if self.npc.can_fire():
 					self.npc.fire()
 					fire_angle = self.npc.angle
-					proj = Projectile(self.npc.x + math.cos(math.radians(fire_angle)) * 40, self.npc.y + math.sin(math.radians(fire_angle)) * 40, fire_angle, self.npc, speed=self.options.get("projectile_speed", 420))
+					proj = self._create_npc_projectile(fire_angle)
 					self.projectiles.append(proj)
 					self.npc_perception.log_event("FIRE", f"ângulo {int(fire_angle)}°")
 					if self.debug_mode:
@@ -445,7 +481,7 @@ class Game:
 				self.last_ai_shot = 0
 				if self.npc.can_fire():
 					self.npc.fire()
-					proj = Projectile(self.npc.x + math.cos(math.radians(self.npc.angle)) * 40, self.npc.y + math.sin(math.radians(self.npc.angle)) * 40, self.npc.angle, self.npc, speed=self.options.get("projectile_speed", 420))
+					proj = self._create_npc_projectile(self.npc.angle)
 					self.projectiles.append(proj)
 					self.npc_perception.log_event("FIRE", f"ângulo {int(self.npc.angle)}°")
 					if self.debug_mode:
@@ -756,7 +792,7 @@ class Game:
 		y_right = self.npc.y + vision_range * math.sin(math.radians(angle_right))
 		pygame.draw.line(self.screen, (100, 255, 100), (self.npc.x, self.npc.y), (x_right, y_right), 1)
 
-		subcone_angle = 12
+		subcone_angle = self.npc_perception.subcone_angle
 		subcone_range = min(vision_range, 900)
 		left_sc = self.npc.angle - subcone_angle
 		right_sc = self.npc.angle + subcone_angle

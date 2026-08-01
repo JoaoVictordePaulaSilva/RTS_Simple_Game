@@ -93,22 +93,20 @@ class CaseDatabase:
 
         self.connection.commit()
 
-        # Pesos de similaridade configuráveis (podem ser ajustados para tuning)
-        # Soma aproximada deve ser 1.0 para manter interpretação consistente
+        # Pesos de similaridade configuráveis (soma = 1.0)
         self.similarity_weights = {
-            "distance": 0.26,
-            "angle": 0.10,
-            "health": 0.10,
-            "visibility": 0.10,
-            "proj_dist": 0.08,
-            "proj_angle": 0.04,
-            "proj_count": 0.04,
-            "border": 0.08,
-            # Novos componentes
-            "age": 0.05,
-            "outcome": 0.07,
-            "action_history": 0.04,
-            "closing_speed": 0.04,
+            "distance": 0.35,
+            "angle": 0.0,
+            "health": 0.15,
+            "visibility": 0.15,
+            "proj_dist": 0.10,
+            "proj_angle": 0.05,
+            "proj_count": 0.05,
+            "border": 0.10,
+            "age": 0.0,
+            "outcome": 0.0,
+            "action_history": 0.0,
+            "closing_speed": 0.05,
         }
 
     # ==========================================================
@@ -252,12 +250,12 @@ class CaseDatabase:
 
         if difficulty:
             cursor.execute(
-                "SELECT * FROM rbc_cases WHERE difficulty = ? ORDER BY avg_reward DESC LIMIT 100",
+                "SELECT * FROM rbc_cases WHERE difficulty = ?",
                 (difficulty,)
             )
         else:
             cursor.execute(
-                "SELECT * FROM rbc_cases ORDER BY avg_reward DESC LIMIT 100"
+                "SELECT * FROM rbc_cases"
             )
 
         all_cases = [dict(row) for row in cursor.fetchall()]
@@ -269,10 +267,12 @@ class CaseDatabase:
                 case["similarity"] = similarity
                 similar_cases.append(case)
 
-        similar_cases.sort(
-            key=lambda c: c["similarity"] * c.get("avg_reward", 1.0),
-            reverse=True
-        )
+        def case_rank_score(c: Dict) -> float:
+            avg_r = c.get("avg_reward", 0.0) or 0.0
+            norm_reward = max(0.1, (avg_r + 25.0) / 75.0)
+            return c["similarity"] * norm_reward
+
+        similar_cases.sort(key=case_rank_score, reverse=True)
 
         return similar_cases[:limit]
 

@@ -13,7 +13,8 @@ class NPCPerception:
 	def __init__(self, tank):
 		self.tank = tank
 		self.vision_range = 800
-		self.vision_angle = 75
+		self.vision_angle = 20
+		self.subcone_angle = 4
 		self.last_seen_player_pos = None
 		self.last_seen_player_angle = None
 		self.perception_memory = []
@@ -53,6 +54,7 @@ class NPCPerception:
 			self.last_seen_player_angle = player_tank.angle
 			self.perception_memory.append(("see", player_tank.x, player_tank.y))
 		else:
+			self.last_seen_player_pos = None
 			self.perception_memory.append(("lost", None, None))
 
 		if self.last_player_y is not None:

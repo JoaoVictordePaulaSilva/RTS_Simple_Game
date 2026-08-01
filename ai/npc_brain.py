@@ -269,11 +269,20 @@ class NPCBrain:
 		damage_taken: float = 0.0,
 		outcome_type: str = "unknown",
 		difficulty: str = "Normal",
+		problem_override: Optional[Problem] = None,
+		solution_override: Optional[Solution] = None,
+		case_id_override: Optional[str] = None,
 	) -> None:
-		if not self.pending_outcome:
+		if problem_override is not None and solution_override is not None:
+			problem = problem_override
+			solution = solution_override
+			target_case_id = case_id_override
+		elif self.pending_outcome:
+			problem, solution = self.pending_outcome
+			target_case_id = self.rbc_engine.last_case_id
+		else:
 			return
 
-		problem, solution = self.pending_outcome
 		outcome = Outcome(success=success, damage_dealt=damage_dealt, damage_taken=damage_taken, outcome_type=outcome_type)
 
 		if self.recent_damage_history:
@@ -369,7 +378,7 @@ class NPCBrain:
 		outcome.reward = reward
 
 		self.rbc_engine.learn(
-			case_id=self.rbc_engine.last_case_id,
+			case_id=target_case_id,
 			problem=problem,
 			solution=solution,
 			outcome=outcome,
