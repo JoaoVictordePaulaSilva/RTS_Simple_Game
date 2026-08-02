@@ -38,15 +38,15 @@ class RBCEngine:
 
 		self.cold_start_episodes = 5
 		self.cold_macro = None
-		self.cold_macro_min_ticks = 6
-		self.cold_macro_max_ticks = 45
+		self.cold_macro_min_ticks = 20
+		self.cold_macro_max_ticks = 50
 		self.cold_macro_fire_interval = 30
 
 		self.action_hold_frames = 0
-		self.action_hold_min = 8
+		self.action_hold_min = 12
 		self.action_hold_max = 24
-		self.explore_hold_min = 2
-		self.explore_hold_max = 8
+		self.explore_hold_min = 8
+		self.explore_hold_max = 16
 
 	def set_player(self, player_id: str):
 		self.player_id = player_id
@@ -65,18 +65,103 @@ class RBCEngine:
 
 	def _start_new_cold_macro(self, problem: Problem) -> None:
 		import random
-		delta = random.uniform(-140, 140)
-		target_y = problem.npc_y + delta
-		behavior = random.choice(["move_and_fire", "move_only", "fire_only"])
-		ticks = random.randint(self.cold_macro_min_ticks, self.cold_macro_max_ticks)
-		fire_interval = random.choice([45, 60, 90])
-		self.cold_macro = {
-			"target_y": target_y,
-			"behavior": behavior,
-			"ticks_remaining": ticks,
-			"fire_interval": fire_interval,
-			"frame_index": 0,
-		}
+
+		# Sob ameaça imediata de projétil
+		projectile_threat = getattr(problem, "projectile_threat_active", False)
+		threat_dist = getattr(problem, "projectile_threat_distance", float("inf"))
+
+		if projectile_threat and threat_dist <= 280:
+			ang = getattr(problem, "nearest_projectile_angle", 0.0)
+			direction = -1 if ang > 0 else 1
+			self.cold_macro = {
+				"behavior": "evade_projectile",
+				"ticks_remaining": random.randint(20, 32),
+				"params": {"direction": direction, "speed": 0.9},
+				"frame_index": 0,
+			}
+			return
+
+		if not problem.player_visible:
+			# ALVO PERDIDO: Alternar aleatoriamente (estocástico) entre grupos de busca
+			# Ações: search, pursue, wander, random_rotate
+			choices = ["search_sweep", "pursue_last_known", "wander_relocate", "rotate_scan"]
+			behavior = random.choice(choices)
+			ticks = random.randint(self.cold_macro_min_ticks, self.cold_macro_max_ticks)
+
+			if behavior == "search_sweep":
+				direction = random.choice([-1, 1])
+				speed = random.uniform(0.5, 0.8)
+				self.cold_macro = {
+					"behavior": "search",
+					"ticks_remaining": ticks,
+					"params": {"direction": direction, "speed": speed},
+					"frame_index": 0,
+				}
+			elif behavior == "pursue_last_known":
+				speed = random.uniform(0.6, 1.0)
+				self.cold_macro = {
+					"behavior": "pursue",
+					"ticks_remaining": ticks,
+					"params": {"speed": speed, "direction": random.choice([-1, 1])},
+					"frame_index": 0,
+				}
+			elif behavior == "wander_relocate":
+				direction = random.choice([-1, 1])
+				speed = random.uniform(0.4, 0.9)
+				self.cold_macro = {
+					"behavior": "wander",
+					"ticks_remaining": ticks,
+					"params": {"direction": direction, "speed": speed},
+					"frame_index": 0,
+				}
+			else:  # rotate_scan
+				direction = random.choice([-1, 1])
+				self.cold_macro = {
+					"behavior": "random_rotate",
+					"ticks_remaining": ticks,
+					"params": {"direction": direction},
+					"frame_index": 0,
+				}
+
+		else:
+			# ALVO VISÍVEL: Alternar estocasticamente entre comportamentos de combate
+			# Ações: pursue, align_and_fire, fire, wander
+			choices = ["pursue_combat", "align_and_fire", "fire_direct", "strafe_combat"]
+			behavior = random.choice(choices)
+			ticks = random.randint(self.cold_macro_min_ticks, self.cold_macro_max_ticks)
+			fire_interval = random.choice([20, 30, 45])
+
+			if behavior == "pursue_combat":
+				self.cold_macro = {
+					"behavior": "pursue_combat",
+					"ticks_remaining": ticks,
+					"fire_interval": fire_interval,
+					"params": {"speed": random.uniform(0.7, 1.0)},
+					"frame_index": 0,
+				}
+			elif behavior == "align_and_fire":
+				self.cold_macro = {
+					"behavior": "align_and_fire",
+					"ticks_remaining": ticks,
+					"params": {},
+					"frame_index": 0,
+				}
+			elif behavior == "fire_direct":
+				self.cold_macro = {
+					"behavior": "fire",
+					"ticks_remaining": ticks,
+					"params": {},
+					"frame_index": 0,
+				}
+			else:  # strafe_combat
+				direction = random.choice([-1, 1])
+				self.cold_macro = {
+					"behavior": "strafe_combat",
+					"ticks_remaining": ticks,
+					"fire_interval": fire_interval,
+					"params": {"direction": direction, "speed": random.uniform(0.5, 0.85)},
+					"frame_index": 0,
+				}
 
 	def decide_action(self, problem: Problem, fallback_solution: Solution, difficulty: str = "Normal") -> Solution:
 		import random
@@ -87,8 +172,26 @@ class RBCEngine:
 
 		if self.episode_count < self.cold_start_episodes:
 			self.mode = "COLD_START"
-			if self.verbose:
-				print("[RBC] COLD START - macro-actions")
+
+			projectile_threat = getattr(problem, "projectile_threat_active", False)
+			threat_dist = getattr(problem, "projectile_threat_distance", float("inf"))
+			current_behavior = self.cold_macro.get("behavior", "") if isinstance(self.cold_macro, dict) else ""
+
+			# Regra 2: Destrava Antecipada (Early Release) se o projétil deixou de ser ameaça
+			if current_behavior == "evade_projectile" and not projectile_threat:
+				self.cold_macro = None
+				current_behavior = ""
+
+			# Se houver ameaça urgente de projétil e a macro não for evasão, força reavaliação
+			if projectile_threat and threat_dist <= 220 and current_behavior != "evade_projectile":
+				self.cold_macro = None
+
+			# Se a visibilidade mudou e não estamos evadindo projétil, ajusta a macro ao contexto tático atual
+			if self.cold_macro and current_behavior != "evade_projectile":
+				if problem.player_visible and current_behavior in ("search", "random_rotate"):
+					self.cold_macro = None
+				elif not problem.player_visible and current_behavior in ("fire", "align_and_fire", "pursue_combat", "strafe_combat"):
+					self.cold_macro = None
 
 			if not self.cold_macro or self.cold_macro.get("ticks_remaining", 0) <= 0:
 				self._start_new_cold_macro(problem)
@@ -96,29 +199,21 @@ class RBCEngine:
 			macro = self.cold_macro
 			macro["ticks_remaining"] -= 1
 			macro["frame_index"] += 1
+			behavior = macro.get("behavior", "")
+			params = macro.get("params", {})
 
-			target_y = macro["target_y"]
-			behavior = macro["behavior"]
-			tol = 8.0
-
-			if behavior in ("move_and_fire", "move_only"):
-				if abs(problem.npc_y - target_y) > tol:
-					direction = 1 if target_y > problem.npc_y else -1
-					speed = 0.7 if behavior == "move_and_fire" else 0.5
-					solution = Solution("wander", {"direction": direction, "speed": speed})
-				else:
-					if behavior == "move_and_fire":
-						if macro["frame_index"] % macro["fire_interval"] == 0:
-							solution = Solution("fire", {})
-						else:
-							solution = Solution("idle", {})
-					else:
-						solution = Solution("idle", {})
-			elif behavior == "fire_only":
-				if macro["frame_index"] % macro["fire_interval"] == 0:
+			if behavior in ("search", "pursue", "wander", "random_rotate", "align_and_fire", "fire", "evade_projectile"):
+				solution = Solution(behavior, params)
+			elif behavior == "pursue_combat":
+				if macro["frame_index"] % macro.get("fire_interval", 30) == 0:
 					solution = Solution("fire", {})
 				else:
-					solution = Solution("idle", {})
+					solution = Solution("pursue", params)
+			elif behavior == "strafe_combat":
+				if macro["frame_index"] % macro.get("fire_interval", 30) == 0:
+					solution = Solution("fire", {})
+				else:
+					solution = Solution("wander", params)
 			else:
 				solution = self._random_action(problem)
 

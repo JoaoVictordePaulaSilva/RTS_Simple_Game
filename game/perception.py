@@ -16,6 +16,7 @@ class NPCPerception:
 		self.vision_angle = 20
 		self.subcone_angle = 4
 		self.last_seen_player_pos = None
+		self.last_known_player_pos = None
 		self.last_seen_player_angle = None
 		self.perception_memory = []
 		self.perception_log = []
@@ -28,8 +29,15 @@ class NPCPerception:
 		self.projectiles_nearby_count = 0
 		self.projectile_threat_active = False
 		self.projectile_threat_distance = float('inf')
-		self.projectile_threat_distance_limit = 340
-		self.projectile_threat_angle_limit = 28
+		
+		# Sistema de Duplo Cone de Percepção
+		# Cone Principal (Identificação do Player): 800px / 20°
+		# Cone Periférico (Ameaça de Projéteis): 380px / 70° (±35°)
+		# Zona de Reflexo Próximo: 160px (percepção 360° para tiros à queima-roupa em rota de colisão)
+		self.peripheral_vision_range = 380
+		self.peripheral_vision_angle = 70
+		self.reflex_danger_range = 160
+		self.projectile_threat_angle_limit = 35
 
 	def can_see(self, other_tank):
 		dx = other_tank.x - self.tank.x
@@ -39,8 +47,7 @@ class NPCPerception:
 		if dist > self.vision_range:
 			return False
 
-		# Ângulo mantido como referência geométrica do cone de visão.
-		# No gameplay atual, as entidades ainda não usam rotação funcional.
+		# Cone Principal de Longo Alcance para o Jogador (20° / ±10°)
 		angle_to_target = math.degrees(math.atan2(dy, dx))
 		angle_diff = abs(angle_to_target - self.tank.angle)
 		if angle_diff > 180:
@@ -51,6 +58,7 @@ class NPCPerception:
 	def update(self, player_tank, dt, projectiles=None):
 		if self.can_see(player_tank):
 			self.last_seen_player_pos = (player_tank.x, player_tank.y)
+			self.last_known_player_pos = (player_tank.x, player_tank.y)
 			self.last_seen_player_angle = player_tank.angle
 			self.perception_memory.append(("see", player_tank.x, player_tank.y))
 		else:
@@ -98,20 +106,32 @@ class NPCPerception:
 				heading_diff = abs(p.angle - angle_to_npc)
 				if heading_diff > 180:
 					heading_diff = 360 - heading_diff
+
+				ang = math.degrees(math.atan2(dy, dx))
+				rel_ang = ang - self.tank.angle
+				if rel_ang > 180:
+					rel_ang -= 360
+				if rel_ang < -180:
+					rel_ang += 360
+
 				if dist < self.nearest_projectile_distance:
 					self.nearest_projectile_distance = dist
-					ang = math.degrees(math.atan2(dy, dx))
-					rel_ang = ang - self.tank.angle
-					if rel_ang > 180:
-						rel_ang -= 360
-					if rel_ang < -180:
-						rel_ang += 360
 					self.nearest_projectile_angle = rel_ang
-				if dist <= self.projectile_threat_distance_limit and heading_diff <= self.projectile_threat_angle_limit:
-					if dist < self.projectile_threat_distance:
-						self.projectile_threat_active = True
-						self.projectile_threat_distance = dist
-				if dist <= 300:
+
+				# VALIDAÇÃO ESTRITA DE TRAJETÓRIA DE COLISÃO (heading_diff <= 35°)
+				is_heading_towards_npc = heading_diff <= self.projectile_threat_angle_limit
+				if is_heading_towards_npc:
+					# Critérios do Duplo Cone + Zona de Reflexo:
+					in_reflex_zone = dist <= self.reflex_danger_range
+					in_peripheral_cone = dist <= self.peripheral_vision_range and abs(rel_ang) <= (self.peripheral_vision_angle / 2)
+					in_primary_cone = dist <= self.vision_range and abs(rel_ang) <= (self.vision_angle / 2)
+
+					if in_reflex_zone or in_peripheral_cone or in_primary_cone:
+						if dist < self.projectile_threat_distance:
+							self.projectile_threat_active = True
+							self.projectile_threat_distance = dist
+
+				if dist <= 350:
 					self.projectiles_nearby_count += 1
 
 	def log_event(self, event_type, details=""):

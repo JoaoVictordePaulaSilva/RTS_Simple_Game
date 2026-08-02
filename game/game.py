@@ -488,22 +488,33 @@ class Game:
 						print(f"  ✓ FIRED (no-rotate mode) at angle {self.npc.angle:.0f}°")
 
 		elif action_type == "pursue":
+			target_y = None
 			if self.npc_perception.last_seen_player_pos:
 				target_y = self.npc_perception.last_seen_player_pos[1]
-				speed_multiplier = params.get("speed", 1.0)
-				if speed_multiplier < 0.6:
-					speed_multiplier = 0.6
-				if speed_multiplier > 1.0:
-					speed_multiplier = 1.0
+			elif getattr(self.npc_perception, 'last_known_player_pos', None):
+				target_y = self.npc_perception.last_known_player_pos[1]
+			else:
+				target_y = self.player.y
 
-				if abs(target_y - self.npc.y) > 10:
-					direction = 1 if target_y > self.npc.y else -1
-					self.npc.move_y(direction * speed_multiplier, dt)
+			speed_multiplier = params.get("speed", 0.85)
+			if speed_multiplier < 0.5:
+				speed_multiplier = 0.5
+			if speed_multiplier > 1.0:
+				speed_multiplier = 1.0
+
+			if target_y is not None and abs(target_y - self.npc.y) > 10:
+				direction = 1 if target_y > self.npc.y else -1
+				self.npc.move_y(direction * speed_multiplier, dt)
+			else:
+				# Se já alcançou a altura Y aproximada mas ainda não enxerga, faz varredura local
+				direction = params.get("direction", 1)
+				self.npc.move_y(direction * 0.5, dt)
 
 		elif action_type == "search":
 			direction = params.get("direction", 1)
-			self.npc.move_y(direction * 0.45, dt)
-			self.npc_perception.log_event("SEARCH", "Varredura vertical...")
+			speed = params.get("speed", 0.6)
+			self.npc.move_y(direction * speed, dt)
+			self.npc_perception.log_event("SEARCH", f"Varredura vertical (dir={direction})...")
 
 		elif action_type == "wander":
 			direction = params.get("direction", 1)
@@ -520,21 +531,44 @@ class Game:
 			pass
 
 		elif action_type == "evade_projectile":
+			# Regra 2: Destrava Antecipada (Early Release)
+			# Se a ameaça de projétil zerar, liberação imediata
 			if not getattr(self.npc_perception, 'projectile_threat_active', False):
+				if hasattr(self, '_current_evade_dir'):
+					self._current_evade_dir = None
 				return
-			direction = params.get("direction", 1)
-			speed = params.get("speed", 1.1)
+
+			speed = params.get("speed", 0.95)
 			if speed > 0.95:
 				speed = 0.95
-			if hasattr(self.npc_perception, 'nearest_projectile_angle'):
-				ang = self.npc_perception.nearest_projectile_angle
-				if ang > 10:
-					direction = -1
-				elif ang < -10:
-					direction = 1
+			speed = max(0.9, speed)
 
-			self.npc.move_y(direction * max(0.9, speed), dt)
+			# Trava de Direção de Esquiva (Evade Lock)
+			if getattr(self, '_current_evade_dir', None) is None:
+				direction = params.get("direction", 1)
+				if hasattr(self.npc_perception, 'nearest_projectile_angle'):
+					ang = self.npc_perception.nearest_projectile_angle
+					direction = -1 if ang > 0 else 1
+				self._current_evade_dir = direction
+			else:
+				direction = self._current_evade_dir
+
+			# Regra 1: Checagem de Borda da Arena (Parede)
+			margin = 25.0
+			if self.npc.y <= (ARENA_TOP + margin) and direction < 0:
+				direction = 1
+				self._current_evade_dir = 1
+			elif self.npc.y >= (ARENA_BOTTOM - margin) and direction > 0:
+				direction = -1
+				self._current_evade_dir = -1
+
+			self.npc.move_y(direction * speed, dt)
 			self.npc_perception.log_event("EVADE", f"dir={direction} sp={speed}")
+
+		else:
+			# Limpa trava de direção ao sair da esquiva
+			if hasattr(self, '_current_evade_dir'):
+				self._current_evade_dir = None
 
 	def _draw_name_input(self):
 		self.screen.fill((20, 26, 36))
@@ -763,6 +797,7 @@ class Game:
 		pygame.draw.rect(self.screen, (255, 150, 150), (self.npc.x - self.npc.width // 2, self.npc.y - self.npc.height // 2, self.npc.width, self.npc.height), 2)
 
 		vision_range = self.npc_perception.vision_range
+		# 1. Cone Principal (Verde: Identificação do Player - 800px / 20°)
 		vision_angle = self.npc_perception.vision_angle
 
 		end_x = self.npc.x + vision_range * math.cos(math.radians(self.npc.angle))
@@ -792,6 +827,33 @@ class Game:
 		y_right = self.npc.y + vision_range * math.sin(math.radians(angle_right))
 		pygame.draw.line(self.screen, (100, 255, 100), (self.npc.x, self.npc.y), (x_right, y_right), 1)
 
+		# 2. Cone Periférico de Ameaças (Laranja: Detecção de Projéteis Próximos - 380px / 70°)
+		p_range = getattr(self.npc_perception, 'peripheral_vision_range', 380)
+		p_angle = getattr(self.npc_perception, 'peripheral_vision_angle', 70)
+		p_left = self.npc.angle - p_angle // 2
+		p_right = self.npc.angle + p_angle // 2
+
+		p_x_left = self.npc.x + p_range * math.cos(math.radians(p_left))
+		p_y_left = self.npc.y + p_range * math.sin(math.radians(p_left))
+		p_x_right = self.npc.x + p_range * math.cos(math.radians(p_right))
+		p_y_right = self.npc.y + p_range * math.sin(math.radians(p_right))
+
+		pygame.draw.line(self.screen, (255, 140, 60), (self.npc.x, self.npc.y), (p_x_left, p_y_left), 1)
+		pygame.draw.line(self.screen, (255, 140, 60), (self.npc.x, self.npc.y), (p_x_right, p_y_right), 1)
+
+		p_points = []
+		for angle in range(int(p_left), int(p_right) + 1, 5):
+			px = self.npc.x + p_range * math.cos(math.radians(angle))
+			py = self.npc.y + p_range * math.sin(math.radians(angle))
+			p_points.append((int(px), int(py)))
+		if len(p_points) > 1:
+			pygame.draw.lines(self.screen, (255, 140, 60), False, p_points, 1)
+
+		# 3. Zona de Reflexo Imediato (Circunferência Vermelha Suave - 160px)
+		r_range = getattr(self.npc_perception, 'reflex_danger_range', 160)
+		pygame.draw.circle(self.screen, (255, 90, 90), (int(self.npc.x), int(self.npc.y)), r_range, 1)
+
+		# Subcone Amarelo de Alinhamento Fino de Tiro
 		subcone_angle = self.npc_perception.subcone_angle
 		subcone_range = min(vision_range, 900)
 		left_sc = self.npc.angle - subcone_angle
@@ -830,9 +892,10 @@ class Game:
 			f"DEBUG MODE (Press D to toggle, R to reset DB)",
 			f"Distance: {dist:.0f}px | NPC Angle: {self.npc.angle:.1f}°",
 			f"Player Angle: {angle_to_player:.1f}° | Diff: {angle_diff:.1f}°",
-			f"Vision: Range={vision_range}px, Cone={vision_angle}°",
-			f"Can See: {self.npc_perception.last_seen_player_pos is not None} (need dist < {vision_range} AND angle diff < {vision_angle/2:.0f}°)",
-			f"InSubcone: {dist <= subcone_range and angle_diff <= subcone_angle} (need dist < {subcone_range} AND angle diff < {subcone_angle}°)",
+			f"Player Vision: Range={vision_range}px, Cone={vision_angle}°",
+			f"Threat Vision: Peripheral={p_range}px/{p_angle}° | Reflex Zone={r_range}px",
+			f"Can See Player: {self.npc_perception.last_seen_player_pos is not None} (need dist < {vision_range} AND angle diff < {vision_angle/2:.0f}°)",
+			f"Threat Active: {self.npc_perception.projectile_threat_active} | Dist: {self.npc_perception.projectile_threat_distance:.0f}px",
 			f"RBC: Casos={rbc_stats.get('total_cases', 0)} | Epsilon={rbc_stats.get('epsilon', 0):.3f} | Avg Reward={rbc_stats.get('avg_reward', 0):.1f}",
 		]
 
