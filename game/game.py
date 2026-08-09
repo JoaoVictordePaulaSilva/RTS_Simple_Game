@@ -14,7 +14,7 @@ from .constants import SCREEN_WIDTH, SCREEN_HEIGHT, FPS, ARENA_TOP, LOG_HEIGHT, 
 from .entities import Tank, Projectile
 from .perception import NPCPerception
 from .ui import Button, NPCFace
-from utils.action_guards import should_auto_fire_in_cold_start
+from utils.action_guards import should_auto_fire_in_cold_start, should_tactical_fire
 from utils.rbc_monitor import RBCMonitorWindow
 from utils.task_queue import AdaptiveTaskQueue, TaskPriority
 
@@ -216,6 +216,20 @@ class Game:
 	def _update_npc_perception_and_ai(self, dt):
 		self.npc_perception.update(self.player, dt, projectiles=self.projectiles)
 		self._update_npc_ai(dt)
+
+		# Avaliação periódica posicional tática a cada 75 frames (~1.25s) para feedback contínuo no modo IA
+		self._frames_since_last_outcome = getattr(self, '_frames_since_last_outcome', 0) + 1
+		if self._frames_since_last_outcome >= 75:
+			self._frames_since_last_outcome = 0
+			difficulty = self.options.get("difficulty", "Normal")
+			self.npc_brain.report_outcome(
+				success=self.npc_perception.last_seen_player_pos is not None,
+				damage_dealt=0.0,
+				damage_taken=0.0,
+				outcome_type="positional_tick",
+				difficulty=difficulty
+			)
+
 
 	def _update_all_projectiles(self, dt):
 		for p in self.projectiles:
@@ -448,7 +462,7 @@ class Game:
 			subcone_angle = self.npc_perception.subcone_angle
 			subcone_range = min(self.npc_perception.vision_range, 900)
 
-			if should_auto_fire_in_cold_start(mode, p_dist, p_ang_diff, subcone_range, subcone_angle):
+			if should_tactical_fire(mode, p_dist, p_ang_diff, subcone_range, subcone_angle):
 				if self.npc.can_fire():
 					self.npc.fire()
 					fire_angle = self.npc.angle
@@ -463,6 +477,12 @@ class Game:
 			print(f"[EXECUTE] Action: {action_type} | Params: {params}")
 
 		if action_type == "fire":
+			if self.npc_perception.last_seen_player_pos:
+				target_y = self.npc_perception.last_seen_player_pos[1]
+				if abs(target_y - self.npc.y) > 10:
+					direction = 1 if target_y > self.npc.y else -1
+					self.npc.move_y(direction * 0.45, dt)
+
 			self.last_ai_shot += dt
 			if self.last_ai_shot >= self.ai_shot_interval:
 				self.last_ai_shot = 0
@@ -476,6 +496,12 @@ class Game:
 						print(f"  ✓ FIRED at NPC visual angle {fire_angle:.0f}°")
 
 		elif action_type == "align_and_fire":
+			if self.npc_perception.last_seen_player_pos:
+				target_y = self.npc_perception.last_seen_player_pos[1]
+				if abs(target_y - self.npc.y) > 10:
+					direction = 1 if target_y > self.npc.y else -1
+					self.npc.move_y(direction * 0.5, dt)
+
 			self.last_ai_shot += dt
 			if self.last_ai_shot >= max(0.2, self.ai_shot_interval * 0.6):
 				self.last_ai_shot = 0

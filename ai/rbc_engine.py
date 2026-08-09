@@ -167,10 +167,17 @@ class RBCEngine:
 		import random
 
 		if getattr(self, 'action_hold_frames', 0) > 0 and self.last_solution is not None:
-			self.action_hold_frames -= 1
-			return self.last_solution
+			threat = getattr(problem, 'projectile_threat_active', False)
+			was_passive = self.last_solution.action in ("idle", "search", "wander")
+			sight_gained = problem.player_visible and was_passive
+			if threat or sight_gained:
+				self.action_hold_frames = 0
+			else:
+				self.action_hold_frames -= 1
+				return self.last_solution
 
 		if self.episode_count < self.cold_start_episodes:
+
 			self.mode = "COLD_START"
 
 			projectile_threat = getattr(problem, "projectile_threat_active", False)
@@ -303,9 +310,21 @@ class RBCEngine:
 	def learn(self, case_id: Optional[str], problem: Problem, solution: Solution, outcome: Outcome, session_id: str, difficulty: str) -> None:
 		if case_id:
 			self.db.update_case_usage(case_id=case_id, success=outcome.success, reward=outcome.reward)
-			return
+			# Se a experiência for relevante (sucesso, alto reward, dano causado/tomado ou modo EXPLORE/posição),
+			# permite ramificar e salvar um novo caso no banco de dados para crescimento constante no modo IA.
+			is_novel_or_high_value = (
+				outcome.success
+				or outcome.reward >= 4.0
+				or outcome.damage_dealt > 0
+				or outcome.damage_taken > 0
+				or outcome.outcome_type in ("hit", "evaded", "positional_tick")
+				or self.mode == "EXPLORE"
+			)
+			if not is_novel_or_high_value:
+				return
 
 		# Filtro de idle redundante:
+
 		# Permite salvar a primeira transição para idle (ex: parada estratégica/cooldown),
 		# mas descarta salvamentos de idles contínuos idênticos sem evento relevante.
 		if solution.action == "idle" and outcome.outcome_type not in ("hit", "damaged", "miss"):
