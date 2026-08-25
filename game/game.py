@@ -23,7 +23,9 @@ class Game:
 	def __init__(self):
 		pygame.init()
 		pygame.display.set_caption("RTS Tanks - Demo")
-		self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+		self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.RESIZABLE | pygame.SCALED)
+		self.is_fullscreen = False
+		self._mouse_click_lock = False
 		self.clock = pygame.time.Clock()
 		self.font = pygame.font.Font(None, 28)
 		self.small_font = pygame.font.Font(None, 20)
@@ -144,10 +146,19 @@ class Game:
 		pygame.quit()
 		sys.exit()
 
+	def toggle_fullscreen(self):
+		pygame.display.toggle_fullscreen()
+		self.is_fullscreen = not self.is_fullscreen
+
 	def handle_events(self):
 		for ev in pygame.event.get():
 			if ev.type == pygame.QUIT:
 				self.running = False
+			elif ev.type == pygame.KEYDOWN:
+				if ev.key == pygame.K_F11 or (ev.key == pygame.K_RETURN and (ev.mod & pygame.KMOD_ALT)):
+					self.toggle_fullscreen()
+					continue
+
 			if self.state == "menu":
 				for b in self.buttons:
 					b.handle_event(ev)
@@ -681,24 +692,31 @@ class Game:
 	def _draw_options(self):
 		self.screen.fill((28, 34, 42))
 		title = pygame.font.Font(None, 48).render(STRINGS[self.language]["options"], True, (240, 240, 240))
-		self.screen.blit(title, (40, 36))
+		self.screen.blit(title, (40, 24))
 
-		y = 110
-		lang_section_bg = pygame.Rect(40, y - 10, SCREEN_WIDTH - 80, 90)
+		mouse_pressed = pygame.mouse.get_pressed()[0]
+		mouse_pos = pygame.mouse.get_pos()
+
+		if not mouse_pressed:
+			self._mouse_click_lock = False
+
+		# 1. Idioma
+		y = 75
+		lang_section_bg = pygame.Rect(40, y - 10, SCREEN_WIDTH - 80, 75)
 		pygame.draw.rect(self.screen, (35, 40, 50), lang_section_bg, border_radius=6)
 		pygame.draw.rect(self.screen, (80, 100, 120), lang_section_bg, 1, border_radius=6)
 
 		lang_label = self.font.render(STRINGS[self.language]["language"] + ":", True, (210, 210, 210))
-		self.screen.blit(lang_label, (60, y))
+		self.screen.blit(lang_label, (60, y + 14))
 
 		btn_w = 140
-		btn_h = 40
+		btn_h = 38
 		btn_gap = 24
 		lang_buttons_total = 2 * btn_w + btn_gap
-		lang_start_x = max(60, (SCREEN_WIDTH - lang_buttons_total) // 2)
+		lang_start_x = SCREEN_WIDTH - 40 - lang_buttons_total
 
-		lang_pt_rect = pygame.Rect(lang_start_x, y + 35, btn_w, btn_h)
-		lang_en_rect = pygame.Rect(lang_start_x + btn_w + btn_gap, y + 35, btn_w, btn_h)
+		lang_pt_rect = pygame.Rect(lang_start_x, y + 8, btn_w, btn_h)
+		lang_en_rect = pygame.Rect(lang_start_x + btn_w + btn_gap, y + 8, btn_w, btn_h)
 
 		pt_color = (100, 200, 100) if self.language == "PT" else (150, 150, 150)
 		pygame.draw.rect(self.screen, pt_color, lang_pt_rect, border_radius=6)
@@ -710,39 +728,69 @@ class Game:
 		en_txt = self.font.render("English", True, (20, 20, 20))
 		self.screen.blit(en_txt, en_txt.get_rect(center=lang_en_rect.center))
 
-		if pygame.mouse.get_pressed()[0]:
-			mouse_pos = pygame.mouse.get_pos()
+		if mouse_pressed and not self._mouse_click_lock:
 			if lang_pt_rect.collidepoint(mouse_pos):
 				self._set_language("PT")
+				self._mouse_click_lock = True
 			elif lang_en_rect.collidepoint(mouse_pos):
 				self._set_language("EN")
+				self._mouse_click_lock = True
 
-		y = 240
-		account_bg = pygame.Rect(40, y - 10, SCREEN_WIDTH - 80, 90)
+		# 2. Modo de Tela
+		y = 165
+		screen_section_bg = pygame.Rect(40, y - 10, SCREEN_WIDTH - 80, 80)
+		pygame.draw.rect(self.screen, (35, 40, 50), screen_section_bg, border_radius=6)
+		pygame.draw.rect(self.screen, (80, 100, 120), screen_section_bg, 1, border_radius=6)
+
+		screen_label = self.font.render(STRINGS[self.language]["screen_mode"], True, (210, 210, 210))
+		self.screen.blit(screen_label, (60, y + 4))
+
+		hint_txt = self.small_font.render(STRINGS[self.language]["fullscreen_hint"], True, (160, 180, 205))
+		self.screen.blit(hint_txt, (60, y + 36))
+
+		mode_btn_rect = pygame.Rect(SCREEN_WIDTH - 320, y + 8, 260, 42)
+		mode_hover = mode_btn_rect.collidepoint(mouse_pos)
+		mode_btn_color = (100, 180, 220) if mode_hover else (70, 140, 180)
+		pygame.draw.rect(self.screen, mode_btn_color, mode_btn_rect, border_radius=6)
+
+		current_mode_str = STRINGS[self.language]["fullscreen"] if self.is_fullscreen else STRINGS[self.language]["windowed"]
+		mode_txt = self.small_font.render(current_mode_str, True, (20, 20, 20))
+		self.screen.blit(mode_txt, mode_txt.get_rect(center=mode_btn_rect.center))
+
+		if mouse_pressed and mode_btn_rect.collidepoint(mouse_pos) and not self._mouse_click_lock:
+			self.toggle_fullscreen()
+			self._mouse_click_lock = True
+
+		# 3. Usuário / Conta
+		y = 260
+		account_bg = pygame.Rect(40, y - 10, SCREEN_WIDTH - 80, 75)
 		pygame.draw.rect(self.screen, (35, 40, 50), account_bg, border_radius=6)
 		pygame.draw.rect(self.screen, (80, 100, 120), account_bg, 1, border_radius=6)
 
 		current_user = self.player_name if self.player_name else STRINGS[self.language]["player_name_placeholder"]
 		user_label = self.font.render(f"{STRINGS[self.language]['logged_as']}: {current_user}", True, (210, 210, 210))
-		self.screen.blit(user_label, (60, y + 8))
+		self.screen.blit(user_label, (60, y + 14))
 
-		login_btn_rect = pygame.Rect(SCREEN_WIDTH - 240, y + 32, 160, 40)
-		login_hover = login_btn_rect.collidepoint(pygame.mouse.get_pos())
+		login_btn_rect = pygame.Rect(SCREEN_WIDTH - 240, y + 8, 160, 40)
+		login_hover = login_btn_rect.collidepoint(mouse_pos)
 		login_color = (120, 180, 120) if login_hover else (100, 160, 100)
 		pygame.draw.rect(self.screen, login_color, login_btn_rect, border_radius=6)
 		login_txt = self.small_font.render(STRINGS[self.language]["change_user"], True, (20, 20, 20))
 		self.screen.blit(login_txt, login_txt.get_rect(center=login_btn_rect.center))
 
-		if pygame.mouse.get_pressed()[0] and login_btn_rect.collidepoint(pygame.mouse.get_pos()):
+		if mouse_pressed and login_btn_rect.collidepoint(mouse_pos) and not self._mouse_click_lock:
 			self.state = "name_input"
+			self._mouse_click_lock = True
 
+		# 4. Dificuldade
 		y = 350
 		diff_title = self.font.render(STRINGS[self.language]["difficulty_in_use"], True, (210, 210, 210))
 		self.screen.blit(diff_title, (60, y))
 		diff_value = self.small_font.render(STRINGS[self.language]["difficulty_locked"], True, (160, 180, 205))
-		self.screen.blit(diff_value, (60, y + 28))
+		self.screen.blit(diff_value, (60, y + 26))
 
-		y = 420
+		# 5. Velocidade do projétil
+		y = 415
 		speed_label = self.font.render(STRINGS[self.language]["projectile_speed"], True, (210, 210, 210))
 		self.screen.blit(speed_label, (60, y))
 
@@ -757,20 +805,22 @@ class Game:
 
 		val = self.font.render(str(int(speed)), True, (220, 220, 220))
 		val_x = (SCREEN_WIDTH // 2) - (val.get_width() // 2)
-		self.screen.blit(val, (val_x, y + 28))
+		self.screen.blit(val, (val_x, y + 26))
 
+		# Rodapé
 		info = self.font.render(STRINGS[self.language]["esc_menu"], True, (150, 150, 150))
-		self.screen.blit(info, (60, SCREEN_HEIGHT - 60))
+		self.screen.blit(info, (60, SCREEN_HEIGHT - 55))
 
-		back_btn_rect = pygame.Rect(SCREEN_WIDTH - 260, SCREEN_HEIGHT - 72, 210, 44)
-		back_hover = back_btn_rect.collidepoint(pygame.mouse.get_pos())
+		back_btn_rect = pygame.Rect(SCREEN_WIDTH - 260, SCREEN_HEIGHT - 65, 210, 44)
+		back_hover = back_btn_rect.collidepoint(mouse_pos)
 		back_color = (170, 170, 170) if back_hover else (145, 145, 145)
 		pygame.draw.rect(self.screen, back_color, back_btn_rect, border_radius=6)
 		back_txt = self.small_font.render(STRINGS[self.language]["back_menu"], True, (20, 20, 20))
 		self.screen.blit(back_txt, back_txt.get_rect(center=back_btn_rect.center))
 
-		if pygame.mouse.get_pressed()[0] and back_btn_rect.collidepoint(pygame.mouse.get_pos()):
+		if mouse_pressed and back_btn_rect.collidepoint(mouse_pos) and not self._mouse_click_lock:
 			self.state = "menu"
+			self._mouse_click_lock = True
 
 	def _draw_game(self):
 		self.screen.fill((50, 120, 50))

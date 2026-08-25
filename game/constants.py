@@ -50,6 +50,10 @@ STRINGS = {
         "difficulty_in_use": "Dificuldade em uso",
         "difficulty_locked": "Normal (fixa)",
         "back_menu": "Voltar ao menu",
+        "screen_mode": "Modo de Tela:",
+        "windowed": "Janela (Redimensionável)",
+        "fullscreen": "Tela Cheia / Maximizado",
+        "fullscreen_hint": "F11 ou Alt+Enter para alternar Tela Cheia",
     },
     "EN": {
         "title": "joguinho",
@@ -90,6 +94,10 @@ STRINGS = {
         "difficulty_in_use": "Difficulty in use",
         "difficulty_locked": "Normal (locked)",
         "back_menu": "Back to menu",
+        "screen_mode": "Screen Mode:",
+        "windowed": "Windowed (Resizable)",
+        "fullscreen": "Fullscreen / Maximized",
+        "fullscreen_hint": "F11 or Alt+Enter to toggle Fullscreen",
     }
 }
 
