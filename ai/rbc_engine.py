@@ -373,11 +373,13 @@ class RBCEngine:
 		if self.verbose:
 			print(f"[RBC] NOVO CASO APRENDIDO: {solution.action} (reward={outcome.reward:.1f}, sucesso={outcome.success})")
 
-	def get_statistics(self) -> Dict:
-		stats = self.db.get_statistics()
+	def get_statistics(self, player_id: Optional[str] = None) -> Dict:
+		target_player = player_id if player_id is not None else self.player_id
+		stats = self.db.get_statistics(player_id=target_player)
 		stats["epsilon"] = self.epsilon
 		stats["mode"] = self.mode
 		stats["episode"] = self.episode_count
+		stats["player_id"] = target_player
 		return stats
 
 	def close(self) -> None:

@@ -76,6 +76,7 @@ class RBCMonitorWindow:
 		status_label.place(x=14, y=390)
 
 		labels = [
+			"Jogador",
 			"Casos armazenados",
 			"Modo",
 			"Epsilon",
@@ -87,15 +88,15 @@ class RBCMonitorWindow:
 		self._value_labels = []
 
 		for idx, label in enumerate(labels):
-			ttk.Label(main, text=label + ":", style="Body.TLabel").grid(row=idx + 1, column=0, sticky="w", pady=4)
+			ttk.Label(main, text=label + ":", style="Body.TLabel").grid(row=idx + 1, column=0, sticky="w", pady=2)
 			val_lbl = ttk.Label(main, text='-', style="Value.TLabel")
-			val_lbl.grid(row=idx + 1, column=1, sticky="e", pady=4)
+			val_lbl.grid(row=idx + 1, column=1, sticky="e", pady=2)
 			self._value_labels.append(val_lbl)
 
-		ttk.Label(main, text="Decisoes do RBC:", style="Body.TLabel").grid(row=7, column=0, columnspan=2, sticky="w", pady=(12, 4))
+		ttk.Label(main, text="Decisoes do RBC:", style="Body.TLabel").grid(row=8, column=0, columnspan=2, sticky="w", pady=(8, 2))
 		self._decision_text = tk.Text(
 			main,
-			height=10,
+			height=8,
 			width=74,
 			bg="#141b25",
 			fg="#a9f0be",
@@ -103,7 +104,7 @@ class RBCMonitorWindow:
 			relief="flat",
 			font=("Consolas", 9)
 		)
-		self._decision_text.grid(row=8, column=0, columnspan=2, sticky="we")
+		self._decision_text.grid(row=9, column=0, columnspan=2, sticky="we")
 		self._decision_text.configure(state="disabled")
 
 		decision_entries = []
@@ -166,11 +167,12 @@ class RBCMonitorWindow:
 					in_game = payload.get("in_game", False)
 
 					try:
-						self._value_labels[0].config(text=str(stats.get("total_cases", 0)))
-						self._value_labels[1].config(text=str(stats.get("mode", "-")))
-						self._value_labels[2].config(text=f"{stats.get('epsilon', 0):.3f}")
-						self._value_labels[3].config(text=f"{stats.get('avg_reward', 0):.2f}")
-						self._value_labels[4].config(text=f"{stats.get('avg_success_rate', 0):.1%}")
+						self._value_labels[0].config(text=str(stats.get("player_id", "-") or "-"))
+						self._value_labels[1].config(text=str(stats.get("total_cases", 0)))
+						self._value_labels[2].config(text=str(stats.get("mode", "-")))
+						self._value_labels[3].config(text=f"{stats.get('epsilon', 0):.3f}")
+						self._value_labels[4].config(text=f"{stats.get('avg_reward', 0):.2f}")
+						self._value_labels[5].config(text=f"{stats.get('avg_success_rate', 0):.1%}")
 					except Exception:
 						pass
 
@@ -183,7 +185,7 @@ class RBCMonitorWindow:
 					lang = payload.get("lang", "PT")
 					conclusion = payload.get("conclusion", "-")
 					try:
-						self._value_labels[5].config(text=conclusion)
+						self._value_labels[6].config(text=conclusion)
 						status_label.config(text=("Partida encerrada" if lang == "PT" else "Match ended"))
 					except Exception:
 						pass

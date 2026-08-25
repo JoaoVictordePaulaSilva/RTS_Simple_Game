@@ -414,20 +414,31 @@ class CaseDatabase:
     # STATISTICS
     # ==========================================================
 
-    def get_statistics(self) -> Dict:
+    def get_statistics(self, player_id: Optional[str] = None) -> Dict:
 
         cursor = self.connection.cursor()
 
-        cursor.execute("SELECT COUNT(*) as total FROM rbc_cases")
-        total = cursor.fetchone()["total"]
+        if player_id:
+            cursor.execute("SELECT COUNT(*) as total FROM rbc_cases WHERE player_id = ?", (player_id,))
+            total = cursor.fetchone()["total"]
 
-        cursor.execute("SELECT AVG(avg_reward) as avg_reward FROM rbc_cases")
-        avg_reward = cursor.fetchone()["avg_reward"] or 0.0
+            cursor.execute("SELECT AVG(avg_reward) as avg_reward FROM rbc_cases WHERE player_id = ?", (player_id,))
+            avg_reward = cursor.fetchone()["avg_reward"] or 0.0
 
-        cursor.execute("SELECT AVG(success_rate) as avg_success FROM rbc_cases")
-        avg_success = cursor.fetchone()["avg_success"] or 0.0
+            cursor.execute("SELECT AVG(success_rate) as avg_success FROM rbc_cases WHERE player_id = ?", (player_id,))
+            avg_success = cursor.fetchone()["avg_success"] or 0.0
+        else:
+            cursor.execute("SELECT COUNT(*) as total FROM rbc_cases")
+            total = cursor.fetchone()["total"]
+
+            cursor.execute("SELECT AVG(avg_reward) as avg_reward FROM rbc_cases")
+            avg_reward = cursor.fetchone()["avg_reward"] or 0.0
+
+            cursor.execute("SELECT AVG(success_rate) as avg_success FROM rbc_cases")
+            avg_success = cursor.fetchone()["avg_success"] or 0.0
 
         return {
+            "player_id": player_id,
             "total_cases": total,
             "avg_reward": avg_reward,
             "avg_success_rate": avg_success

@@ -45,6 +45,8 @@ class Game:
 
 		initialize_database(force_reset=False)
 		self.npc_brain = NPCBrain("npc_cases.db")
+		if self.player_name:
+			self.npc_brain.set_player(self.player_name)
 		self.current_session_id = None
 		self.action_frame_counter = 0
 
@@ -193,6 +195,8 @@ class Game:
 			name = STRINGS[self.language].get("player_name_placeholder", "joguinho")
 		self.player_name = name[:12]
 		self.reset_game()
+		self.npc_brain.set_player(self.player_name)
+		self._update_rbc_monitor(in_game=False)
 		if go_to_menu:
 			self.state = "menu"
 

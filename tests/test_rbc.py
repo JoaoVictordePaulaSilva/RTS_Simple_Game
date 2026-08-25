@@ -285,6 +285,78 @@ def test_problem_encoding_includes_border_and_closing_speed():
     print("  ✓ Encoding inclui borda, histórico e closing speed")
 
 
+def test_user_specific_statistics():
+    """Testa se as estatísticas são filtradas corretamente por usuário."""
+    print("✓ Testando estatísticas específicas por usuário...")
+
+    db_path = "test_user_stats.db"
+    Path(db_path).unlink(missing_ok=True)
+
+    db = CaseDatabase(db_path)
+
+    case_alice = {
+        "case_id": "case_alice_1",
+        "player_id": "Alice",
+        "problem_distance": 100.0,
+        "problem_angle_diff": 10.0,
+        "problem_npc_health": 100.0,
+        "problem_player_health": 100.0,
+        "problem_player_visible": True,
+        "solution_action": "fire",
+        "result_success": True,
+        "total_reward": 10.0,
+        "avg_reward": 10.0,
+        "usage_count": 1,
+        "success_count": 1,
+        "success_rate": 1.0,
+    }
+    db.insert_case(case_alice)
+
+    case_bob = {
+        "case_id": "case_bob_1",
+        "player_id": "Bob",
+        "problem_distance": 200.0,
+        "problem_angle_diff": 20.0,
+        "problem_npc_health": 80.0,
+        "problem_player_health": 80.0,
+        "problem_player_visible": True,
+        "solution_action": "pursue",
+        "result_success": False,
+        "total_reward": 50.0,
+        "avg_reward": 50.0,
+        "usage_count": 1,
+        "success_count": 0,
+        "success_rate": 0.0,
+    }
+    db.insert_case(case_bob)
+
+    stats_alice = db.get_statistics("Alice")
+    assert stats_alice["player_id"] == "Alice"
+    assert stats_alice["total_cases"] == 1
+    assert stats_alice["avg_reward"] == 10.0
+    assert stats_alice["avg_success_rate"] == 1.0
+
+    stats_bob = db.get_statistics("Bob")
+    assert stats_bob["player_id"] == "Bob"
+    assert stats_bob["total_cases"] == 1
+    assert stats_bob["avg_reward"] == 50.0
+    assert stats_bob["avg_success_rate"] == 0.0
+
+    stats_charlie = db.get_statistics("Charlie")
+    assert stats_charlie["player_id"] == "Charlie"
+    assert stats_charlie["total_cases"] == 0
+    assert stats_charlie["avg_reward"] == 0.0
+    assert stats_charlie["avg_success_rate"] == 0.0
+
+    stats_global = db.get_statistics(None)
+    assert stats_global["total_cases"] == 2
+    assert stats_global["avg_reward"] == 30.0
+
+    db.close()
+    Path(db_path).unlink(missing_ok=True)
+    print("  ✓ Estatísticas por usuário funcionam corretamente")
+
+
 def run_all_tests():
     """Executa todos os testes."""
     print("\n" + "="*50)
@@ -300,6 +372,7 @@ def run_all_tests():
         test_evade_requires_real_threat,
         test_alignment_auto_fire_is_cold_start_only,
         test_problem_encoding_includes_border_and_closing_speed,
+        test_user_specific_statistics,
     ]
     
     passed = 0

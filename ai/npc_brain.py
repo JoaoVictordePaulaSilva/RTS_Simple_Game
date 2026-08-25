@@ -388,8 +388,8 @@ class NPCBrain:
 
 		self.pending_outcome = None
 
-	def get_statistics(self) -> Dict:
-		return self.rbc_engine.get_statistics()
+	def get_statistics(self, player_id: Optional[str] = None) -> Dict:
+		return self.rbc_engine.get_statistics(player_id=player_id)
 
 	def close(self) -> None:
 		if hasattr(self, 'rbc_engine') and self.rbc_engine:
