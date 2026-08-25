@@ -60,11 +60,34 @@ O ecossistema do software é segmentado em quatro camadas independentes e modula
 
 ---
 
+## 🎮 Executável Direct (Jogar sem instalar Python)
+
+O jogo possui um arquivo executável standalone compilado para **Windows**, dispensando a instalação prévia do Python ou de dependências do ambiente (`pygame`, `psutil`).
+
+### 🚀 Como Executar o Binário:
+1. Acesse o diretório `dist/`.
+2. Dê um duplo clique no arquivo **`RTS_Simple_Game.exe`** (ou execute via terminal `./dist/RTS_Simple_Game.exe`).
+3. O banco de dados de conhecimento da IA (`npc_cases.db`) acompanha o binário no mesmo diretório e armazena incrementalmente o aprendizado das partidas.
+
+### 🛠️ Como Gerar um Novo Executável (.exe):
+Caso realize alterações no código-fonte e deseje compilar um novo binário standalone:
+1. Execute o script de compilação automatizado:
+   ```bash
+   python build_exe.py
+   ```
+2. O script executará o PyInstaller e copiará o banco de dados `npc_cases.db` automaticamente para a pasta `dist/`.
+
+---
+
 ## Estrutura de Diretórios do Repositório
 
 ```text
 .
-├── main.py                # Ponto de entrada unificado da aplicação
+├── main.py                # Ponto de entrada unificado da aplicação em Python
+├── build_exe.py           # Script de automação para compilação do executável (.exe)
+├── dist/                  # Diretório contendo o executável compilado e banco de dados
+│   ├── RTS_Simple_Game.exe# Executável do jogo para Windows
+│   └── npc_cases.db       # Banco de dados de casos da IA RBC
 ├── .gitignore             # Definição de arquivos e binários desconsiderados pelo Git
 ├── ai/                    # Módulos relativos à lógica de inteligência artificial e modelos RBC
 ├── database/              # Infraestrutura de persistência de dados e scripts de inicialização

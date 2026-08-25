@@ -9,3 +9,5 @@ __pycache__/
 *.sqlite-wal
 .venv/
 .vscode/
+build/
+*.spec
