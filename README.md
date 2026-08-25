@@ -9,6 +9,15 @@
    <img src="https://img.shields.io/badge/Psutil-3776AB?style=for-the-badge&logo=psutil&logoColor=white" alt="Psutil" />
 </p>
 
+<p align="center">
+   <a href="./dist/RTS_Simple_Game.exe">
+      <img src="https://img.shields.io/badge/⬇️_Baixar_Executável-.exe-2ea44f?style=for-the-badge&logo=windows&logoColor=white" alt="Baixar Executável .exe" />
+   </a>
+   <a href="./dist/">
+      <img src="https://img.shields.io/badge/📁_Abrir_Pasta-dist/-007acc?style=for-the-badge&logo=windows-terminal&logoColor=white" alt="Abrir Pasta dist" />
+   </a>
+</p>
+
 ## Visão Geral do Projeto
 
 Este projeto consiste no desenvolvimento de um protótipo de jogo de Estratégia em Tempo Real (RTS) desenvolvido em Python utilizando a biblioteca Pygame. O foco central do trabalho é a implementação de um agente autônomo (NPC) dotado de Inteligência Artificial baseada na metodologia de **Raciocínio Baseado em Casos (RBC)**, integrada a um banco de dados relacional leve para persistência e evolução do conhecimento.
@@ -62,11 +71,20 @@ O ecossistema do software é segmentado em quatro camadas independentes e modula
 
 ## 🎮 Executável Direct (Jogar sem instalar Python)
 
+<p align="center">
+   <a href="./dist/RTS_Simple_Game.exe">
+      <img src="https://img.shields.io/badge/⬇️_Baixar_Executável-RTS__Simple__Game.exe-success?style=for-the-badge&logo=windows&logoColor=white" alt="Baixar Executável" />
+   </a>
+   <a href="./dist/">
+      <img src="https://img.shields.io/badge/📁_Navegar_na_Pasta-dist/-blue?style=for-the-badge&logo=open-access&logoColor=white" alt="Abrir Pasta dist" />
+   </a>
+</p>
+
 O jogo possui um arquivo executável standalone compilado para **Windows**, dispensando a instalação prévia do Python ou de dependências do ambiente (`pygame`, `psutil`).
 
 ### 🚀 Como Executar o Binário:
-1. Acesse o diretório `dist/`.
-2. Dê um duplo clique no arquivo **`RTS_Simple_Game.exe`** (ou execute via terminal `./dist/RTS_Simple_Game.exe`).
+1. Clique em **[📁 Abrir Pasta dist/](./dist/)** ou baixe diretamente **[⬇️ RTS_Simple_Game.exe](./dist/RTS_Simple_Game.exe)**.
+2. Dê um duplo clique no arquivo **`RTS_Simple_Game.exe`**.
 3. O banco de dados de conhecimento da IA (`npc_cases.db`) acompanha o binário no mesmo diretório e armazena incrementalmente o aprendizado das partidas.
 
 ### 🛠️ Como Gerar um Novo Executável (.exe):
