@@ -255,7 +255,8 @@ class RBCEngine:
 			solution = self._adapt_solution(chosen, problem)
 			self.last_case_id = chosen["case_id"]
 			if self.verbose:
-				print(f"[RBC] EXPLORANDO (Top 3) caso #{chosen['case_id'][:8]} (sim={chosen.get('similarity', 0):.3f})")
+				display_id = chosen['case_id'] if len(chosen['case_id']) <= 12 else chosen['case_id'][-8:]
+				print(f"[RBC] EXPLORANDO (Top 3) caso #{display_id} (sim={chosen.get('similarity', 0):.3f})")
 		else:
 			self.mode = "EXPLOIT"
 			# Escolhe o melhor caso (Top 1)
@@ -263,7 +264,8 @@ class RBCEngine:
 			solution = self._adapt_solution(chosen, problem)
 			self.last_case_id = chosen["case_id"]
 			if self.verbose:
-				print(f"[RBC] EXPLOITANDO (Top 1) caso #{chosen['case_id'][:8]} (sim={chosen.get('similarity', 0):.3f})")
+				display_id = chosen['case_id'] if len(chosen['case_id']) <= 12 else chosen['case_id'][-8:]
+				print(f"[RBC] EXPLOITANDO (Top 1) caso #{display_id} (sim={chosen.get('similarity', 0):.3f})")
 
 		try:
 			if explore or not similar_cases:
