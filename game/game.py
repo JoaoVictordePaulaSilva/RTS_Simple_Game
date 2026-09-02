@@ -15,6 +15,7 @@ from .entities import Tank, Projectile
 from .perception import NPCPerception
 from .ui import Button, NPCFace
 from utils.action_guards import should_auto_fire_in_cold_start, should_tactical_fire
+from utils.analytics_manager import AnalyticsManager
 from utils.rbc_monitor import RBCMonitorWindow
 from utils.task_queue import AdaptiveTaskQueue, TaskPriority
 
@@ -46,7 +47,9 @@ class Game:
 		self.options = {"difficulty": "Normal", "projectile_speed": 420}
 
 		initialize_database(force_reset=False)
+		self.analytics_manager = AnalyticsManager("npc_cases.db")
 		self.npc_brain = NPCBrain("npc_cases.db")
+		self.npc_brain.analytics_manager = self.analytics_manager
 		if self.player_name:
 			self.npc_brain.set_player(self.player_name)
 		self.current_session_id = None
@@ -127,6 +130,7 @@ class Game:
 		self.current_session_id = str(uuid.uuid4())
 		self.npc_brain.set_session(self.current_session_id)
 		self.npc_brain.set_player(self.player_name)
+		self.analytics_manager.start_match(session_id=self.current_session_id, player_id=self.player_name)
 		self.action_frame_counter = 0
 		self.match_result_text = ""
 		self.match_conclusion_sent = False
@@ -329,6 +333,19 @@ class Game:
 				self._update_rbc_monitor(in_game=False)
 				self.rbc_monitor.show_match_conclusion({"lang": self.language, "conclusion": self.match_result_text or self._build_match_result_text()})
 				self.rbc_monitor.push_decision(f"MATCH_END: {self.match_result_text or self._build_match_result_text()}")
+				
+				winner = "NPC" if self.player.health <= 0 and self.npc.health > 0 else "Player" if self.npc.health <= 0 and self.player.health > 0 else "Draw"
+				epsilon_val = self.npc_brain.rbc_engine.epsilon if hasattr(self.npc_brain, "rbc_engine") and self.npc_brain.rbc_engine else 0.0
+				self.analytics_manager.record_match_end(
+					session_id=self.current_session_id or "default",
+					player_id=self.player_name or "player",
+					winner=winner,
+					player_health=self.player.health,
+					npc_health=self.npc.health,
+					duration_frames=self.frame_counter,
+					epsilon=epsilon_val
+				)
+
 				self.match_conclusion_sent = True
 		else:
 			self._monitor_update_timer += dt

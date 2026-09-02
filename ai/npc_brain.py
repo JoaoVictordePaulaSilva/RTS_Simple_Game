@@ -377,6 +377,10 @@ class NPCBrain:
 		reward = max(-25.0, reward)
 		outcome.reward = reward
 
+		if hasattr(self, "analytics_manager") and self.analytics_manager:
+			self.analytics_manager.record_reward(reward)
+			self.analytics_manager.record_damage(dealt=damage_dealt, taken=damage_taken)
+
 		self.rbc_engine.learn(
 			case_id=target_case_id,
 			problem=problem,

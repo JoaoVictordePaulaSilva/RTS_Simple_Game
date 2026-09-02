@@ -91,6 +91,31 @@ class CaseDatabase:
         if 'problem_recent_actions' not in existing_cols:
             cursor.execute("ALTER TABLE rbc_cases ADD COLUMN problem_recent_actions TEXT DEFAULT '[]'")
 
+        # Tabela de histórico de partidas para análise de desempenho
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS match_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            match_number INTEGER,
+            session_id TEXT,
+            player_id TEXT,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+            duration_seconds REAL,
+            duration_frames INTEGER,
+            winner TEXT,
+            player_final_health REAL,
+            npc_final_health REAL,
+            npc_damage_dealt REAL,
+            npc_damage_taken REAL,
+            total_cases_count INTEGER,
+            new_cases_created INTEGER,
+            match_total_reward REAL,
+            match_avg_reward REAL,
+            overall_avg_reward REAL,
+            npc_win_rate REAL,
+            epsilon REAL
+        )
+        """)
+
         self.connection.commit()
 
         # Pesos de similaridade configuráveis (soma = 1.0)
@@ -443,6 +468,55 @@ class CaseDatabase:
             "avg_reward": avg_reward,
             "avg_success_rate": avg_success
         }
+
+    # ==========================================================
+    # MATCH HISTORY & ANALYTICS
+    # ==========================================================
+
+    def insert_match_record(self, match_data: Dict) -> int:
+        cursor = self.connection.cursor()
+        
+        cursor.execute("SELECT COUNT(*) as cnt FROM match_history")
+        count = cursor.fetchone()["cnt"] or 0
+        match_number = match_data.get("match_number", count + 1)
+
+        cursor.execute("""
+            INSERT INTO match_history (
+                match_number, session_id, player_id, duration_seconds, duration_frames,
+                winner, player_final_health, npc_final_health, npc_damage_dealt, npc_damage_taken,
+                total_cases_count, new_cases_created, match_total_reward, match_avg_reward,
+                overall_avg_reward, npc_win_rate, epsilon
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            match_number,
+            match_data.get("session_id", "default"),
+            match_data.get("player_id", "player"),
+            match_data.get("duration_seconds", 0.0),
+            match_data.get("duration_frames", 0),
+            match_data.get("winner", "Draw"),
+            match_data.get("player_final_health", 0.0),
+            match_data.get("npc_final_health", 0.0),
+            match_data.get("npc_damage_dealt", 0.0),
+            match_data.get("npc_damage_taken", 0.0),
+            match_data.get("total_cases_count", 0),
+            match_data.get("new_cases_created", 0),
+            match_data.get("match_total_reward", 0.0),
+            match_data.get("match_avg_reward", 0.0),
+            match_data.get("overall_avg_reward", 0.0),
+            match_data.get("npc_win_rate", 0.0),
+            match_data.get("epsilon", 0.0),
+        ))
+        self.connection.commit()
+        return cursor.lastrowid
+
+    def get_match_history(self, limit: Optional[int] = None) -> List[Dict]:
+        cursor = self.connection.cursor()
+        query = "SELECT * FROM match_history ORDER BY match_number ASC"
+        if limit:
+            query = f"SELECT * FROM ({query} DESC LIMIT {limit}) ORDER BY match_number ASC"
+        cursor.execute(query)
+        return [dict(row) for row in cursor.fetchall()]
     # ==========================================================
     # CLOSE
     # ==========================================================
