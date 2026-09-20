@@ -170,17 +170,15 @@ R: Em seu caso, você deve ver:
 - CPU mais previsível
 - Menos travamentos
 
-## 📚 Próximos Passos
+## 📚 Integração e Próximos Passos
 
-1. Copie `task_queue.py` para seu projeto
-2. Instale: `pip install psutil`
-3. Adapte o loop do `jogo.py` seguindo exemplos em `docs/examples/task_queue_integration.py`
-4. Teste com `debug=True` para entender o fluxo
-5. Ajuste `initial_tasks_per_frame` conforme necessário
-6. Considere: Pode ser útil para futuros NPCs também!
+1. O gerenciador `AdaptiveTaskQueue` (`utils/task_queue.py`) já se encontra totalmente integrado ao game loop principal em `game/game.py`.
+2. Para entender o detalhamento da integração por prioridade, consulte o [Manual de Integração](INTEGRATION_GUIDE.md).
+3. Para ativar o modo debug de logs da fila, altere `debug=True` na instanciação do `AdaptiveTaskQueue` em `game/game.py`.
 
 ---
 
-**Criado para:** RTS em Pygame
-**Data:** 2026-06-23
-**Compatibilidade:** Python 3.8+
+**Aplicação:** RTS Tanks Pygame  
+**Módulo:** `utils/task_queue.py`  
+**Compatibilidade:** Python 3.8+, Pygame 2.0+
+

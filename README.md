@@ -103,16 +103,16 @@ Caso realize alterações no código-fonte e deseje compilar um novo binário st
 .
 ├── main.py                # Ponto de entrada unificado da aplicação em Python
 ├── build_exe.py           # Script de automação para compilação do executável (.exe)
-├── dist/                  # Diretório contendo o executável compilado e banco de dados
+├── dist/                  # Diretório contendo o executável compilado (.exe) e banco de dados
 │   ├── RTS_Simple_Game.exe# Executável do jogo para Windows
 │   └── npc_cases.db       # Banco de dados de casos da IA RBC
-├── .gitignore             # Definição de arquivos e binários desconsiderados pelo Git
-├── ai/                    # Módulos relativos à lógica de inteligência artificial e modelos RBC
-├── database/              # Infraestrutura de persistência de dados e scripts de inicialização
+├── analytics/             # Gráficos de desempenho (dashboard.png) e histórico CSV exportados
+├── ai/                    # Módulos da IA RBC, cérebro do NPC e dataclasses (Problem, Solution, Outcome)
+├── database/              # Infraestrutura SQLite (CaseDatabase) e inicializador da base
 ├── docs/                  # Centralização de relatórios técnicos e guias de arquitetura
-├── game/                  # Lógica do jogo, gerenciamento de entidades, interface e constantes
-├── tests/                 # Suíte de testes unitários para verificação de regressão
-└── utils/                 # Utilitários de otimização, monitoramento e gerenciamento de tarefas
+├── game/                  # Game loop principal, entidades, percepção tática e interface gráfica
+├── utils/                 # Gerenciador de fila adaptativa (TaskQueue), RBC Monitor Web e AnalyticsManager
+└── .gitignore             # Definição de arquivos desconsiderados pelo Git
 ```
 
 ---
@@ -121,12 +121,11 @@ Caso realize alterações no código-fonte e deseje compilar um novo binário st
 
 Para obter detalhes aprofundados sobre a implementação teórica, guias de desenvolvimento e configurações avançadas, consulte os documentos listados abaixo presentes no diretório `docs/`:
 
-* **[Especificação Arquitetural](docs/ARQUITETURA.md):** Contém o mapeamento completo de dependências, fluxo de decisão do NPC entre as camadas e diagrama estrutural do ciclo RBC acoplado ao SQLite.
-* **[Manual de Implementação RBC](docs/README_RBC.md):** Explicação matemática do cálculo de similaridade por pesos ponderados, estrutura de dados dos componentes (Problem, Solution, Outcome) e práticas de Clean Code adotadas.
-* **[Arquitetura da Fila de Tarefas](docs/TASK_QUEUE_README.md):** Teoria de funcionamento do algoritmo adaptativo de distribuição de carga computacional e mitigação de picos de processamento em tempo de execução.
-* **[Guia de Início Rápido](docs/QUICK_START.md):** Instruções simplificadas passo a passo para instalação de dependências e validação inicial das ferramentas.
-* **[Manual de Integração Prática](docs/INTEGRATION_GUIDE.md):** Tutorial direcionado para a manutenção e expansão do ciclo principal da aplicação associado ao sistema de prioridades.
-* **[Exemplos de Código](docs/examples/task_queue_integration.py):** Scripts isolados demonstrando cenários hipotéticos de escalabilidade e tratamento estatístico do consumo de CPU.
+* **[Especificação Arquitetural](docs/ARQUITETURA.md):** Contém o mapeamento completo de dependências, fluxo de decisão do NPC entre as camadas e esquema relacional do SQLite.
+* **[Manual de Implementação RBC](docs/README_RBC.md):** Explicação matemática do cálculo de similaridade por pesos ponderados, estrutura estendida do `Problem` e ações táticas.
+* **[Arquitetura da Fila de Tarefas](docs/TASK_QUEUE_README.md):** Teoria de funcionamento do algoritmo adaptativo de distribuição de carga computacional por FPS.
+* **[Guia de Início Rápido](docs/QUICK_START.md):** Instruções simplificadas passo a passo para instalação de dependências e execução do projeto.
+* **[Manual de Integração da TaskQueue](docs/INTEGRATION_GUIDE.md):** Documentação detalhada sobre como a `AdaptiveTaskQueue` está integrada no `game/game.py`.
 
 ---
 
@@ -134,12 +133,12 @@ Para obter detalhes aprofundados sobre a implementação teórica, guias de dese
 
 Para iniciar a aplicação a partir de um ambiente limpo, siga o procedimento operacional padrão detalhado a seguir:
 
-1. Instale as dependências externas necessárias (Game Engine e Telemetria) no interpretador Python local:
+1. Instale as dependências externas necessárias (Game Engine, Telemetria e Analytics) no interpretador Python local:
    ```bash
-   pip install pygame psutil
+   pip install pygame psutil matplotlib
    ```
 
-2. Execute o inicializador do banco de dados para criar o esquema relacional e injetar a base de conhecimento inicial necessária para a tomada de decisões do NPC:
+2. Execute o inicializador do banco de dados para criar o esquema relacional e verificar a base de conhecimento:
    ```bash
    python -m database.initializer
    ```
@@ -147,9 +146,4 @@ Para iniciar a aplicação a partir de um ambiente limpo, siga o procedimento op
 3. Inicie o ciclo principal da simulação através do ponto de entrada centralizado:
    ```bash
    python main.py
-   ```
-
-Para homologação de alterações estruturais na inteligência ou no motor de tarefas, utilize os testes de regressão automatizados:
-```bash
-python -m unittest discover tests
-```
+   ```

@@ -2,258 +2,132 @@
 
 ## 📋 Visão Geral
 
-Sistema de IA para NPC em jogo RTS implementando **RBC (Raciocínio Baseado em Casos)** integrado com **SQLite** para persistência de conhecimento.
+Sistema de Inteligência Artificial para NPC em jogo RTS implementando **Raciocínio Baseado em Casos (RBC / CBR)** integrado ao **SQLite** para persistência, evolução contínua de conhecimento e aprendizado adaptativo sob política $\epsilon$-greedy.
+
+---
 
 ## 🏗️ Arquitetura
 
-```
-main.py                    (Novo ponto de entrada)
-├── game/                  (Loop principal do jogo)
-├── ai/                    (Interface de IA do NPC e motor RBC)
-├── database/              (Gerenciamento SQLite)
-└── db_init.py             (Inicialização do banco)
+```text
+main.py                    (Ponto de entrada da aplicação)
+├── game/                  (Loop do jogo, percepção tática, entidades e UI)
+├── ai/                    (Cérebro do NPC, motor RBC e modelos de dados)
+├── database/              (Gerenciamento SQLite, tabelas e inicialização)
+└── utils/                 (TaskQueue, Web RBC Monitor e AnalyticsManager)
 ```
 
-## 📁 Descrição dos Arquivos
+---
+
+## 📁 Descrição dos Módulos
 
 ### `database/`
 **Gerenciamento de persistência em SQLite**
 
-- Classe `CaseDatabase`: Interface para operações no BD
-- Métodos principais:
-  - `insert_case()`: Armazena novo caso
-  - `get_similar_cases()`: Recupera casos similares (Recuperação RBC)
-  - `_calculate_similarity()`: Calcula similaridade entre problema e caso
-  - `update_case_usage()`: Atualiza estatísticas de sucesso
+- **Classe `CaseDatabase`**: Interface para operações CRUD no banco `npc_cases.db`.
+- **Métodos Principais**:
+  - `insert_case()`: Armazena novos casos aprendidos durante partidas.
+  - `get_similar_cases()`: Recupera os $K$ casos mais semelhantes ponderando similaridade perceptiva e média de recompensa acumulada (`avg_reward`).
+  - `_calculate_similarity()`: Calcula a similaridade ponderada entre o vetor de problema atual e os casos salvos.
+  - `update_case_usage()`: Atualiza o contador de uso, taxa de sucesso e recompensa acumulada do caso.
+  - `insert_match_record()`: Registra dados estatísticos de partidas finalizadas na tabela `match_history`.
 
 **Tabelas:**
-- `rbc_cases`: Armazena casos (problema + solução + resultado)
-- `game_sessions`: Metadados de sessões de jogo
+- `rbc_cases`: Armazena a base de casos (Problema, Solução, Resultado, Pesos e Recompensas).
+- `match_history`: Histórico de partidas para análise temporal de progresso (vitórias, dano, reward e epsilon).
+
+---
 
 ### `ai/rbc_engine.py`
-**Motor de Raciocínio Baseado em Casos**
+**Motor de Raciocínio Baseado em Casos (RBC)**
 
-Classes:
-- `Problem`: Representa estado do jogo (distância, ângulo, saúde, visibilidade)
-- `Solution`: Representa ação/solução (tipo de ação + parâmetros)
-- `Outcome`: Representa resultado (sucesso, dano, tipo)
+Dataclasses (`ai/rbc_models.py`):
+- **`Problem`**: Representa a percepção completa do NPC:
+  - `distance`, `angle_diff`: Distância e alinhamento em relação ao jogador.
+  - `npc_health`, `player_health`: Estados de vida.
+  - `player_visible`, `frames_lost`: Visibilidade do alvo.
+  - `nearest_projectile_distance`, `nearest_projectile_angle`, `projectiles_nearby_count`: Percepção de projéteis inimigos.
+  - `projectile_threat_active`, `projectile_threat_distance`: Sinalização de ameaça iminente de projétil.
+  - `edge_distance_top`, `edge_distance_bottom`, `nearest_edge_distance`: Distância em relação às paredes da arena.
+  - `border_pressure`, `border_side`: Pressão de encurralamento por borda.
+  - `closing_speed`: Velocidade de aproximação relativa.
+  - `recent_actions`: Histórico das últimas ações executadas.
+- **`Solution`**: Ação tática (`action`, `params`).
+- **`Outcome`**: Resultado numérico (`success`, `damage_dealt`, `damage_taken`, `outcome_type`, `reward`).
 
-Classe `RBCEngine`:
-- `decide_action()`: Decide ação usando RBC (com fallback para IA básica)
-- `_adapt_solution()`: Adapta solução de caso anterior ao novo problema
-- `learn()`: Armazena novo caso no banco
+**Classe `RBCEngine`**:
+- **Cold Start**: Nos primeiros 5 episódios, executa macros estocásticos para explorar a arena e criar a base inicial de conhecimento.
+- **$\epsilon$-Greedy Decay**: Alterna entre exploração (Top-3 casos) e explotação (Top-1 caso), decaindo a taxa de exploração ($\epsilon$) ao término de cada partida.
+- `decide_action()`: Decide a ação a ser executada com trava de permanência por quadros (`action_hold_frames`).
+- `learn()`: Valida e armazena casos de alto valor tático no banco de dados.
+
+---
 
 ### `ai/npc_brain.py`
-**Cérebro do NPC integrando RBC e IA básica**
+**Cérebro do NPC e Cálculo de Recompensa**
 
-Classe `NPCBrain`:
-- `decide_action()`: Interface principal para decidir ações do NPC
-- `_encode_problem()`: Converte estado do jogo em estrutura de Problema
-- `_generate_fallback_action()`: IA básica hardcoded como fallback
-- `report_outcome()`: Registra resultado para aprendizado
-- `get_statistics()`: Retorna estatísticas de aprendizado
+- Encoda a percepção espacial da arena no objeto `Problem`.
+- Trata **comportamentos ineficazes** (detecta se o NPC ficou travado na mesma posição ou repetindo ações sem causar dano, aplicando penalidades e elevando temporariamente a taxa de exploração $\epsilon$).
+- Calcula a função de recompensa do agente com base em dano infligido, dano sofrido, esquiva de projéteis e posicionamento relativo às paredes.
 
-<!-- seed_cases removed: initial cases are now handled internally by `db_init.py` / `CaseDatabase`. -->
+---
 
-### `db_init.py`
-**Utilitário de inicialização**
+### `database/initializer.py`
+**Utilitário de Inicialização**
 
-- `initialize_database()`: Cria BD com seed cases
-- `print_database_stats()`: Exibe estatísticas
+- `initialize_database()`: Garante a criação do banco de dados e recupera automaticamente o arquivo se for detectada corrupção de dados.
+- `print_database_stats()`: Exibe estatísticas de casos no console.
 
-## 🔄 Fluxo de Funcionamento
-
-### Decisão de Ação (por frame)
-```
-1. NPC codifica estado atual → Problem
-2. RBC tenta recuperar casos similares
-   ├─ Se encontra: Adapta melhor caso
-   └─ Se não encontra: Usa IA básica como fallback
-3. Executa ação
-4. Aguarda resultado
-```
-
-### Aprendizado (após ação)
-```
-1. Jogador relata sucesso/fracasso da ação
-2. RBC cria novo Caso e armazena no BD
-3. Atualiza estatísticas de casos similares usados
-4. BD cresce com experiência do NPC
-```
+---
 
 ## 📊 Tipos de Ações Disponíveis
 
-| Ação | Descrição | Parâmetros |
-|------|-----------|------------|
-| `fire` | Dispara na direção atual | `angle_adjustment` |
-| `align_and_fire` | Alinha antes de disparar | `target_angle`, `speed` |
-| `pursue` | Persegue o jogador | `speed`, `rotate` |
-| `search` | Procura pelo jogador | `rotation_direction` |
-| `idle` | Fica parado | - |
+| Ação | Descrição | Parâmetros Principais |
+|------|-----------|-----------------------|
+| `fire` | Dispara projétil direto no alvo visível | `{}` |
+| `align_and_fire` | Ajusta posicionamento e dispara | `{}` |
+| `pursue` | Persegue o jogador na arena | `speed`, `direction` |
+| `search` | Realiza varredura para reencontrar o jogador | `direction`, `speed` |
+| `wander` | Movimenta-se para explorar novos ângulos | `direction`, `speed` |
+| `random_rotate` | Movimentação estocástica de varredura | `direction` |
+| `evade_projectile` | Esquiva lateral imediata contra projéteis inimigos | `direction`, `speed` |
+| `idle` | Mantém posição por instante estratégico | `{}` |
 
-## 📈 Evolução Temporal
-
-### Jogo 1 (BD vazio)
-- Usa 7 seed cases
-- Comportamento previsível
-- Cria ~10-20 novos casos
-
-### Jogo 5-10 (BD ~100 casos)
-- RBC funciona parcialmente
-- Recupera alguns casos similares
-- Comportamento melhora gradualmente
-
-### Jogo 20+ (BD ~500+ casos)
-- RBC é principal
-- Comportamento adaptativo
-- Aprendizado especializado por dificuldade
+---
 
 ## 🧮 Cálculo de Similaridade
 
-Implementa métrica ponderada baseada em:
+A similaridade $S \in [0.0, 1.0]$ entre o problema atual e um caso armazenado é calculada no `CaseDatabase` por uma combinação ponderada de fatores:
 
 ```python
-similarity = (
-    distance_similarity × 0.4 +      # Distância: 40%
-    angle_similarity × 0.2 +         # Ângulo: 20%
-    health_similarity × 0.2 +        # Saúde: 20%
-    visibility_match × 0.2           # Visibilidade: 20%
-)
-```
-
-Intervalo: [0.0, 1.0] onde 1.0 = caso idêntico
-
-## 🎮 Integração com Jogo
-
-### Modificações em `jogo.py`
-
-1. **Inicialização** (`__init__`):
-```python
-from ai.npc_brain import NPCBrain
-self.npc_brain = NPCBrain("npc_cases.db")
-```
-
-2. **Decisão** (`_update_npc_ai`):
-```python
-action = self.npc_brain.decide_action(
-    npc_x, npc_y, npc_angle, npc_health,
-    player_x, player_y, player_health,
-    player_visible, frames_since_last_seen,
-    difficulty
-)
-self._execute_npc_action(action, dt)
-```
-
-3. **Aprendizado** (colisões):
-```python
-self.npc_brain.report_outcome(
-    success=True,
-    damage_dealt=25,
-    damage_taken=0,
-    outcome_type="hit",
-    difficulty=difficulty
-)
-```
-
-## 📊 Estatísticas Exibidas
-
-Na tela de Game Over, o jogo exibe:
-- Total de casos no banco
-- Quantidade de seed cases vs casos aprendidos
-- Taxa média de sucesso
-
-## 🚀 Como Usar
-
-### Primeira Execução
-```bash
-python jogo.py
-```
-O sistema automaticamente:
-1. Verifica se BD existe
-2. Se vazio, cria o esquema inicial do banco
-3. Começa o jogo
-
-### Resetar Banco (opcional)
-```bash
-python db_init.py --force-reset
-```
-
-### Ver Estatísticas
-```bash
-python db_init.py
-```
-
-## 🔧 Customização
-
-### Adicionar Casos Iniciais
-Para adicionar casos iniciais (seed) você pode:
-
-- Inserir diretamente no banco via um script Python que use `CaseDatabase.insert_case()`;
-- Ou estender `db_init.py` para popular casos quando o banco for criado.
-
-Exemplo rápido (inserir via script):
-
-```python
-from database.case_database import CaseDatabase
-
-db = CaseDatabase('npc_cases.db')
-db.insert_case({
-    'case_id': 'seed_custom',
-    'problem_distance': 200.0,
-    'problem_angle_diff': 10.0,
-    'problem_npc_health': 100,
-    'problem_player_health': 100,
-    'problem_player_visible': True,
-    'solution_action': 'align_and_fire',
-    'solution_params': {},
-    'result_success': True,
-    'result_damage_dealt': 25,
-    'difficulty': 'Normal',
-})
-```
-
-### Ajustar Pesos de Similaridade
-Em `database/case_database.py`, função `_calculate_similarity()`:
-
-```python
-weights = {
-    "distance": 0.4,    # Aumentar para priorizar distância
-    "angle": 0.2,
-    "health": 0.2,
-    "visibility": 0.2
+similarity_weights = {
+    "distance": 0.35,       # Distância vertical até o jogador
+    "health": 0.15,         # Diferença de saúde dos tanques
+    "visibility": 0.15,     # Coincidência de estado de visibilidade
+    "border": 0.10,         # Pressão e proximidade de paredes
+    "proj_dist": 0.10,      # Distância ao projétil mais próximo
+    "proj_angle": 0.05,     # Ângulo do projétil inimigo
+    "proj_count": 0.05,     # Quantidade de projéteis próximos
+    "closing_speed": 0.05,  # Velocidade de aproximação relativa
 }
 ```
 
-### Adicionar Novas Ações
-1. Defina em `ai/npc_brain.py`, método `_generate_fallback_action()`
-2. Implemente execução em `_execute_npc_action()`
+---
 
-## 📈 Métricas Coletadas
+## 🚀 Como Executar
 
-O banco automaticamente rastreia:
-- **Uso**: Quantas vezes cada caso foi usado
-- **Sucesso**: Quantas vezes resultou em sucesso
-- **Taxa de Sucesso**: Percentual de sucessos
-- **Último Uso**: Timestamp do último uso
-- **Dificuldade**: Associação com nível de dificuldade
+### 1. Iniciar o Jogo
+```bash
+python main.py
+```
 
-## ✅ Clean Code Practices
+### 2. Verificar Estatísticas da Base RBC
+```bash
+python -m database.initializer
+```
 
-✓ Separação de responsabilidades  
-✓ Type hints em todas as funções  
-✓ Docstrings em português/inglês  
-✓ Nomes descritivos (sem abreviaturas)  
-✓ Context managers para gerenciamento de recursos  
-✓ Dataclasses para estruturas simples  
-✓ Evita magic numbers (constantes nomeadas)  
+---
 
-## 🎯 Próximos Passos (Futuro)
+## 📈 Visualização de Analytics e Telemetria
 
-1. **Análise de Dados**: Extrair insights do BD
-2. **Visualização**: Gráficos de evolução do aprendizado
-3. **Otimização**: Melhorar cálculo de similaridade
-4. **Expansão**: Mais tipos de ação e parâmetros
-5. **Comparação**: RBC vs IA tradicional
-6. **Multiplayer**: Sincronizar BD entre sessões
-
-## 📝 Licença
+1. **Dashboard Gráfico**: Ao final de cada partida, o `AnalyticsManager` (`utils/analytics_manager.py`) gera e atualiza automaticamente o painel visual `analytics/dashboard.png` com gráficos de recompensa, taxa de vitórias, crescimento de casos e eficiência de combate.
+2. **Web RBC Monitor**: O jogo inicia um servidor de telemetria em segundo plano que exibe os logs de decisões RBC no navegador.

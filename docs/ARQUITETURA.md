@@ -1,33 +1,40 @@
-# Estrutura do Projeto - RBC System
+# Estrutura do Projeto - RTS Tanks RBC System
 
 ## 📂 Estrutura de Diretórios
 
-```
-d:\Projetos Facul\TCC\RTS em Pygames\
-├── main.py                (Novo ponto de entrada)
-├── jogo.py                (Compatibilidade/launcher legado)
-├── ai/                    (Camada de IA e RBC)
-├── database/              (Persistência SQLite)
-├── game/                  (Loop principal e entidades do jogo)
-├── utils/                 (Ferramentas auxiliares)
-├── db_init.py             (Inicialização do BD)
-├── tests/                 (Testes unitários RBC e TaskQueue)
-├── npc_cases.db           (Banco de dados SQLite - criado automaticamente)
-├── README_RBC.md          (Documentação do RBC)
-└── docs/ARQUITETURA.md    (Este arquivo)
+```text
+RTS_Simple_Game/
+├── main.py                (Ponto de entrada unificado)
+├── build_exe.py           # Automação da compilação PyInstaller (.exe)
+├── dist/                  (Executável compilado e npc_cases.db)
+├── analytics/             (Gráficos dashboard.png e relatórios CSV)
+├── ai/                    (Camada de Inteligência Artificial e RBC)
+│   ├── npc_brain.py       (Cérebro do NPC, codificação de problemas e recompensa)
+│   ├── rbc_engine.py      (Motor RBC: Cold Start, Epsilon-Greedy, Adaptação)
+│   └── rbc_models.py      (Dataclasses: Problem, Solution, Outcome)
+├── database/              (Camada de Persistência SQLite)
+│   ├── case_database.py   (Interface de banco, tabelas SQL e função de similaridade)
+│   └── initializer.py     (Inicialização, recuperação de corrupção e stats)
+├── game/                  (Game loop principal, entidades e UI)
+│   ├── game.py            (Orquestrador do jogo, integração com TaskQueue e RBC)
+│   ├── entities.py        (Tanques e Projéteis com detecção de origem de caso)
+│   ├── perception.py      (Percepção visual, subcones de tiro e ameaças)
+│   └── ui/                (Botões e Expressão facial dinâmica do NPC)
+├── utils/                 (Utilitários de infraestrutura e otimização)
+│   ├── task_queue.py      (Fila de Tarefas Adaptativa por Prioridades)
+│   ├── rbc_monitor.py     (Servidor Web local e Dashboard de Telemetria)
+│   ├── analytics_manager.py (Coleta de métricas e geração de gráficos Matplotlib)
+│   └── action_guards.py   (Guardiões de tiro tático e travas de cold start)
+└── docs/                  (Documentação técnica e guias)
 ```
 
-## 📋 Descrição de Cada Arquivo
+---
+
+## 📋 Descrição dos Componentes e Arquivos
 
 ### `main.py`
-**Arquivo principal do jogo**
-
-Classe principal:
-- `Game`: Classe principal que orquestra tudo
-
-Modificações para a nova estrutura:
-- Usa `game.game.Game`
-- Mantém a inicialização centralizada no pacote `game`
+**Ponto de entrada centralizado**
+- Instancia e executa a classe `game.game.Game`.
 
 ---
 
@@ -35,224 +42,147 @@ Modificações para a nova estrutura:
 **Gerenciamento de persistência em SQLite**
 
 Classe principal:
-- `CaseDatabase`: Interface com BD
+- `CaseDatabase`: Interface com o banco de dados `npc_cases.db`.
 
 Métodos públicos:
-- `__init__(db_path)`: Inicializa conexão e cria tabelas
-- `insert_case(case_data)`: Armazena novo caso
-- `get_similar_cases(problem, threshold, limit)`: Recuperação RBC
-- `update_case_usage(case_id, success)`: Atualiza estatísticas
-- `get_statistics()`: Retorna stats do BD
-- `close()`: Fecha conexão
-
-Métodos privados:
-- `_initialize_database()`: Cria tabelas e índices
-- `_calculate_similarity(problem, case)`: Calcula similaridade [0,1]
+- `__init__(db_path)`: Conecta e garante a existência das tabelas e índices.
+- `insert_case(case_data)`: Armazena um novo caso aprendido.
+- `get_similar_cases(problem, threshold, limit, difficulty)`: Recupera os casos mais semelhantes aplicando ranking ponderado por similaridade e recompensa acumulada (`avg_reward`).
+- `update_case_usage(case_id, success, reward)`: Atualiza `usage_count`, `success_rate` e `avg_reward` do caso.
+- `insert_match_record(match_data)`: Registra métricas de fim de partida na tabela `match_history`.
+- `get_match_history(limit)`: Retorna histórico de partidas.
+- `get_statistics(player_id)`: Retorna métricas agregadas.
 
 Tabelas SQL:
 ```sql
-rbc_cases (id, case_id, problem_distance, problem_angle_diff, 
-           problem_npc_health, problem_player_health, 
-           problem_player_visible, problem_frames_lost,
-           solution_action, solution_params,
-           result_success, result_damage_dealt, result_damage_taken,
-           result_outcome, difficulty, session_id, timestamp,
-           usage_count, success_count, success_rate, last_used,
-           created_by)
+rbc_cases (
+    id INTEGER PRIMARY KEY,
+    case_id TEXT UNIQUE,
+    player_id TEXT,
+    problem_distance REAL, problem_angle_diff REAL,
+    problem_nearest_projectile_distance REAL, problem_nearest_projectile_angle REAL,
+    problem_projectiles_nearby_count INTEGER,
+    problem_edge_distance_top REAL, problem_edge_distance_bottom REAL, problem_nearest_edge_distance REAL,
+    problem_border_pressure REAL, problem_border_side INTEGER, problem_closing_speed REAL,
+    problem_recent_actions TEXT,
+    problem_npc_health REAL, problem_player_health REAL, problem_player_visible INTEGER,
+    problem_frames_lost INTEGER,
+    solution_action TEXT, solution_params TEXT,
+    result_success INTEGER, result_damage_dealt REAL, result_damage_taken REAL, result_outcome TEXT,
+    difficulty TEXT, session_id TEXT, timestamp DATETIME,
+    usage_count INTEGER, success_count INTEGER, success_rate REAL,
+    total_reward REAL, avg_reward REAL,
+    last_used DATETIME, created_by TEXT
+);
 
-game_sessions (session_id, start_time, end_time, difficulty,
-               npc_final_health, player_final_health, npc_won,
-               case_count_at_end, avg_similarity_used)
+match_history (
+    id INTEGER PRIMARY KEY,
+    match_number INTEGER, session_id TEXT, player_id TEXT, timestamp DATETIME,
+    duration_seconds REAL, duration_frames INTEGER, winner TEXT,
+    player_final_health REAL, npc_final_health REAL, npc_damage_dealt REAL, npc_damage_taken REAL,
+    total_cases_count INTEGER, new_cases_created INTEGER,
+    match_total_reward REAL, match_avg_reward REAL, overall_avg_reward REAL,
+    npc_win_rate REAL, epsilon REAL
+);
 ```
 
 ---
 
 ### `ai/`
-**Motor de RBC e cérebro do NPC**
+**Motor RBC e Inteligência do Agente**
 
-Dataclasses:
-- `Problem`: Estado do jogo (distance, angle_diff, healths, visibility)
-- `Solution`: Ação (action, params)
-- `Outcome`: Resultado (success, damage, type)
+Dataclasses (`ai/rbc_models.py`):
+- `Problem`: Estado perceptivo completo (distância vertical, vida, visibilidade, ameaça de projéteis, distância das bordas da arena, pressão de parede, velocidade de aproximação `closing_speed`, histórico de ações recentes).
+- `Solution`: Ação tática a executar (`action`, `params`).
+- `Outcome`: Recompensa e impacto numérico (`success`, `damage_dealt`, `damage_taken`, `outcome_type`, `reward`).
 
-Classe principal:
-- `RBCEngine`: Motor RBC
-- `NPCBrain`: Interface entre jogo e RBC
-
-Métodos públicos:
-- `decide_action(problem, fallback, difficulty)`: Recupera e adapta
-- `learn(case_id, problem, solution, outcome, session_id, difficulty)`: Aprende
-- `report_outcome(success, damage_dealt, damage_taken, ...)`: Registra resultado
-- `get_statistics()`: Retorna stats
-- `close()`: Fecha BD
-
-Fluxo:
-1. Recupera casos similares do BD
-2. Se encontra: adapta melhor caso
-3. Se não: usa fallback (IA básica)
-4. Retorna solução a executar
+Classes principais:
+- `RBCEngine`: Gerencia as fases de **Cold Start** (macros estocásticos), **Exploração vs Explotação ($\epsilon$-greedy decay)**, recuperação top-K e função de adaptação de soluções.
+- `NPCBrain`: Interface entre a simulação e o RBC. Transforma a percepção em `Problem`, calcula funções de recompensa dinâmicas (penalização por ineficácia/posição travada) e chama `RBCEngine.learn()`.
 
 ---
 
 ### `game/`
-**Loop principal, entidades e interface do jogo**
+**Game Loop, Simulação Física e Interface**
 
-Componentes principais:
-- `game.game.Game`
-- `game.entities.Tank`
-- `game.entities.Projectile`
-- `game.perception.NPCPerception`
-- `game.ui.button.Button`
-- `game.ui.npc_face.NPCFace`
-
-Responsabilidades:
-- Estado principal do jogo
-- IA do NPC em `_update_npc_ai()`
-- Colisões e aprendizado em `report_outcome()`
-- Interface, menus e telas de fim de jogo
+Componentes:
+- `game.game.Game`: Orquestra o ciclo de quadros, enfileira chamadas na `AdaptiveTaskQueue`, gerencia telas (Menu, Login de Jogador, Opções, Game Over) e dispara a gravação de métricas.
+- `game.entities.Tank` e `Projectile`: Entidades físicas do jogo. Projéteis do NPC guardam a referência da decisão de origem (`origin_problem`, `origin_solution`, `origin_case_id`) para reportar *hit* ou *miss* com precisão.
+- `game.perception.NPCPerception`: Processa visibilidade, subcones de varredura e detecta projéteis inimigos em rota de colisão.
+- `game.ui.NPCFace`: Renderiza dinamicamente a expressão do NPC com base na ação escolhida e estado de saúde.
 
 ---
 
 ### `utils/`
-**Ferramentas auxiliares**
+**Infraestrutura e Ferramentas Auxiliares**
 
-Componentes:
-- `utils.task_queue`
-- `utils.rbc_monitor`
-
-Responsabilidades:
-- Priorização e distribuição de tarefas por frame
-- Monitoramento de estatísticas do RBC
+- `utils.task_queue.AdaptiveTaskQueue`: Distribui o processamento por frame dividindo tarefas em prioridades (`CRITICAL`, `HIGH`, `MEDIUM`, `LOW`) e reduzindo dynamicamente o limite conforme o uso de CPU (`psutil`).
+- `utils.rbc_monitor.RBCMonitorWindow`: Servidor web integrado e janela de telemetria em tempo real das decisões do RBC.
+- `utils.analytics_manager.AnalyticsManager`: Registra estatísticas por partida em arquivo CSV (`analytics/match_history.csv`) e gera de forma assíncrona dashboards gráficos (`analytics/dashboard.png`) via Matplotlib.
+- `utils.action_guards`: Guardiões lógicos para otimizar disparo tático e cold start.
 
 ---
 
-### `db_init.py`
-**Utilitário de inicialização**
+### `database/initializer.py`
+**Utilitário de Inicialização**
 
 Funções:
-- `initialize_database(db_path, force_reset)`: Cria BD com seed cases
-- `print_database_stats(db_path)`: Exibe estatísticas
+- `initialize_database(db_path, force_reset)`: Inicializa o banco de dados SQLite, realizando recuperações automáticas caso o arquivo esteja corrompido.
+- `print_database_stats(db_path)`: Imprime relatório de estatísticas no console.
 
 Uso:
 ```bash
-python db_init.py
-python db_init.py --force-reset
+python -m database.initializer
 ```
 
 ---
 
-### `test_rbc.py`
-**Suite de testes unitários**
-
-Testes:
-1. `test_database_initialization()`: Cria BD vazio
-2. `test_case_insertion()`: Insere casos
-3. `test_similarity_calculation()`: Calcula similaridade
-4. `test_rbc_engine()`: Motor RBC básico
-5. `test_npc_brain()`: Cérebro do NPC
-
-Resultado esperado:
-```
-RESULTADOS: 5 passou(ram), 0 falhou/falharam
-```
-
----
-
-### `test_task_queue.py`
-**Suite de testes da fila de tarefas**
-
-Valida:
-- Prioridades
-- Adaptabilidade
-- Performance
-- Estatísticas
-- Tarefas críticas nunca adiadas
-
----
-
-### `npc_cases.db` (Banco de Dados)
-**Banco SQLite criado automaticamente**
-
-Criado automaticamente na primeira execução.
-Contém:
-- 7 seed cases iniciais
-- Casos aprendidos durante o jogo
-
-Tamanho inicial: ~20 KB
-Cresce ~10 KB por jogo (dependendo de duração)
-
----
-
-### `README_RBC.md`
-**Documentação completa do sistema RBC**
-
-Seções:
-- Visão geral
-- Arquitetura
-- Descrição de arquivos
-- Fluxo de funcionamento
-- Tipos de ações
-- Evolução temporal
-- Cálculo de similaridade
-- Integração com jogo
-- Como usar
-- Customização
-- Métricas coletadas
-
-## 🔄 Fluxo de Dados
+## 🔄 Fluxo de Dados e Decisão
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│ JOGO (game/game.py)                                     │
-│ ┌───────────────────────────────────────────────────┐  │
-│ │ update() → _update_npc_ai()                       │  │
-│ └───────────────────────────────────────────────────┘  │
-└──────────────┬──────────────────────────────────────────┘
-               │
-               ├─ codifica estado
-               │
-┌──────────────▼──────────────────────────────────────────┐
-│ NPC_BRAIN (ai/npc_brain.py)                            │
-│ ┌───────────────────────────────────────────────────┐  │
-│ │ decide_action()                                  │  │
-│ │   └─ Problem(distance, angle, health...)        │  │
-│ └───────────────────────────────────────────────────┘  │
-└──────────────┬──────────────────────────────────────────┘
-               │
-┌──────────────▼──────────────────────────────────────────┐
-│ RBC_ENGINE (ai/rbc_engine.py)                           │
-│ ┌───────────────────────────────────────────────────┐  │
-│ │ decide_action()                                  │  │
-│ │   ├─ recupera casos similares                   │  │
-│ │   ├─ adapta melhor caso (ou fallback)           │  │
-│ │   └─ Solution(action, params)                   │  │
-│ └───────────────────────────────────────────────────┘  │
-└──────────────┬──────────────────────────────────────────┘
-               │
-┌──────────────▼──────────────────────────────────────────┐
-│ DATABASE (database/case_database.py)                    │
-│ ┌───────────────────────────────────────────────────┐  │
-│ │ get_similar_cases()                              │  │
-│ │   ├─ SELECT * FROM rbc_cases                    │  │
-│ │   ├─ calcula similaridade de cada                │  │
-│ │   └─ retorna top N                               │  │
-│ └───────────────────────────────────────────────────┘  │
-└──────────────┬──────────────────────────────────────────┘
-               │
-┌──────────────▼──────────────────────────────────────────┐
-│ SQLITE (npc_cases.db)                                   │
-│ ┌───────────────────────────────────────────────────┐  │
-│ │ Armazena: seed cases + casos aprendidos         │  │
-│ └───────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────┐
+│ JOGO (game/game.py)                                                      │
+│ ┌────────────────────────────────────────────────────────────────────┐   │
+│ │ update() → Enfileira tarefas na AdaptiveTaskQueue                   │   │
+│ └────────────────────────────────────────────────────────────────────┘   │
+└──────────────────────────────────┬───────────────────────────────────────┘
+                                   │
+                                   ├─ 1. Codifica percepção completa
+                                   │
+┌──────────────────────────────────▼───────────────────────────────────────┐
+│ NPC_BRAIN (ai/npc_brain.py)                                             │
+│ ┌────────────────────────────────────────────────────────────────────┐   │
+│ │ decide_action() → Problem(dist, health, proj_threat, border...)    │   │
+│ └──────────────────────────────────┬─────────────────────────────────┘   │
+└────────────────────────────────────┼─────────────────────────────────────┘
+                                     │
+┌────────────────────────────────────▼─────────────────────────────────────┐
+│ RBC_ENGINE (ai/rbc_engine.py)                                            │
+│ ┌────────────────────────────────────────────────────────────────────┐   │
+│ │ decide_action()                                                    │   │
+│ │   ├─ Cold Start (Episódios 0..4) → Macros estocásticos              │   │
+│ │   ├─ Epsilon-Greedy (Episódios 5+)                                 │   │
+│ │   ├─ Recupera casos (threshold=0.45) e adapta                      │   │
+│ │   └─ Solution(action, params)                                      │   │
+│ └──────────────────────────────────┬─────────────────────────────────┘   │
+└────────────────────────────────────┼─────────────────────────────────────┘
+                                     │
+┌────────────────────────────────────▼─────────────────────────────────────┐
+│ DATABASE (database/case_database.py)                                     │
+│ ┌────────────────────────────────────────────────────────────────────┐   │
+│ │ get_similar_cases()                                                │   │
+│ │   ├─ SELECT * FROM rbc_cases                                       │   │
+│ │   ├─ Métrica de similaridade ponderada por 12 fatores              │   │
+│ │   └─ Ranking ponderado por similaridade × reward                   │   │
+│ └──────────────────────────────────┬─────────────────────────────────┘   │
+└────────────────────────────────────┼─────────────────────────────────────┘
+                                     │
+┌────────────────────────────────────▼─────────────────────────────────────┐
+│ SQLITE (npc_cases.db)                                                    │
+│ ┌────────────────────────────────────────────────────────────────────┐   │
+│ │ Armazena: rbc_cases (conhecimento) + match_history (métricas)      │   │
+│ └────────────────────────────────────────────────────────────────────┘   │
+└──────────────────────────────────────────────────────────────────────────┘
 
-                    APRENDIZADO (feedback)
+                    APRENDIZADO (report_outcome + learn)
 ```
-
----
-
-## 🎯 Próximos Passos
-
-- Expandir métricas de aprendizagem
-- Criar gráficos de evolução do NPC
-- Separar exemplos de integração em arquivos menores dentro de `docs/`

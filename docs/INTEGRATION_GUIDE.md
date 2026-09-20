@@ -1,260 +1,137 @@
-"""
-INTEGRAÇÃO PRÁTICA: TaskQueue no jogo.py
-PRACTICAL INTEGRATION: TaskQueue in jogo.py
-"""
+# Documentação de Integração da Fila de Tarefas (TaskQueue)
 
-# ============================================================================
-# PASSO 1: Adicionar imports no topo do jogo.py
-# ============================================================================
+## 📌 Visão Geral
 
-IMPORTS_TO_ADD = """
+A classe `AdaptiveTaskQueue` (`utils/task_queue.py`) está integrada ao loop principal do jogo em `game/game.py`. Seu objetivo é evitar picos de consumo de CPU e garantir uma taxa de quadros (FPS) estável, escalonando o processamento de tarefas por nível de prioridade.
+
+---
+
+## 🏗️ Como a TaskQueue é Inicializada
+
+No construtor `__init__` da classe `Game` em `game/game.py`:
+
+```python
+from utils.task_queue import AdaptiveTaskQueue, TaskPriority
 import psutil
 import os
-from utils.task_queue import AdaptiveTaskQueue, TaskPriority
-"""
 
-# ============================================================================
-# PASSO 2: Adicionar no __init__ de Game (junto com outros inicializadores)
-# ============================================================================
+# Inicialização com limite dinâmico inicial de 5 tarefas por frame e threshold de CPU em 70%
+self.task_queue = AdaptiveTaskQueue(
+    initial_tasks_per_frame=5,
+    cpu_threshold=0.70,
+    debug=False
+)
+self.process = psutil.Process(os.getpid())
+```
 
-INIT_CODE = """
-def __init__(self):
-    # ... código existente ...
-    
-    # === NOVO: Inicializa fila de tarefas ===
-    self.task_queue = AdaptiveTaskQueue(
-        initial_tasks_per_frame=5,
-        cpu_threshold=0.75,
-        debug=False  # Mude para True se quiser ver logs
-    )
-    
-    # Para monitorar CPU
-    self.process = psutil.Process(os.getpid())
-    
-    # ... resto do código ...
-"""
+---
 
-# ============================================================================
-# PASSO 3: Adicionar método helper para CPU
-# ============================================================================
+## ⚡ Monitoramento de Uso de CPU
 
-HELPER_METHOD = """
+A amostragem de CPU é feita através do método `get_cpu_usage()`:
+
+```python
 def get_cpu_usage(self) -> float:
-    '''Retorna uso de CPU do processo (0-1).'''
+    """Retorna a porcentagem de uso de CPU do processo (0.0 a 1.0)."""
     try:
         return self.process.cpu_percent(interval=0.01) / 100.0
-    except:
+    except Exception:
         return 0.0
-"""
+```
 
-# ============================================================================
-# PASSO 4: MODIFICAR o método update() - PARTE CRÍTICA
-# ============================================================================
+---
 
-UPDATE_BEFORE = """
-    def update(self, dt):
-        if self.state == "playing":
-            self.frame_counter += 1
-            self._monitor_update_timer += dt
-            
-            keys = pygame.key.get_pressed()
-            # Movimento do jogador: apenas eixo Y / Player movement: only Y axis
-            if keys[pygame.K_UP]:
-                self.player.move_y(-1, dt)
-            if keys[pygame.K_DOWN]:
-                self.player.move_y(1, dt)
+## 🔄 Fluxo de Escalonamento em `update(dt)`
 
-            # Atualização de cooldown / Player cooldown update
-            self.player.update(dt)
-            self.npc.update(dt)
-            
-            # Atualiza percepção do NPC / Update NPC perception
-            self.npc_perception.update(self.player, dt, projectiles=self.projectiles)
+A cada frame no estado `"playing"`, as rotinas do jogo são convertidas em tarefas com prioridades distintas e adicionadas à fila:
 
-            # ===== IA DO NPC =====
-            self._update_npc_ai(dt)
-
-            # Atualiza projéteis / update projectiles
-            for p in self.projectiles:
-                p.update(dt)
-
-            # Colisões / collisions
-            # ... resto do código ...
-"""
-
-UPDATE_AFTER = """
-    def update(self, dt):
-        if self.state == "playing":
-            self.frame_counter += 1
-            self._monitor_update_timer += dt
-            
-            # ===== NOVO: Monitorar CPU e adaptar ===
-            cpu_usage = self.get_cpu_usage()
-            self.task_queue.update_cpu_usage(cpu_usage)
-            
-            # ===== NOVO: Input é CRÍTICO (sempre executa) ===
-            def handle_player_input():
-                keys = pygame.key.get_pressed()
-                if keys[pygame.K_UP]:
-                    self.player.move_y(-1, dt)
-                if keys[pygame.K_DOWN]:
-                    self.player.move_y(1, dt)
-            
-            self.task_queue.add(
-                func=handle_player_input,
-                priority=TaskPriority.CRITICAL,
-                name="player_input"
-            )
-            
-            # ===== NOVO: Atualizar cooldown do jogador (CRÍTICO) ===
-            self.task_queue.add(
-                func=self.player.update,
-                args=(dt,),
-                priority=TaskPriority.CRITICAL,
-                name="player_cooldown"
-            )
-            
-            # ===== Atualização do NPC (ALTA prioridade) ===
-            self.task_queue.add(
-                func=self.npc.update,
-                args=(dt,),
-                priority=TaskPriority.HIGH,
-                name="npc_update"
-            )
-            
-            # ===== Percepção do NPC (ALTA prioridade - afeta IA) ===
-            self.task_queue.add(
-                func=self.npc_perception.update,
-                args=(self.player, dt),
-                kwargs={"projectiles": self.projectiles},
-                priority=TaskPriority.HIGH,
-                name="npc_perception"
-            )
-            
-            # ===== IA do NPC (ALTA prioridade - RBC) ===
-            self.task_queue.add(
-                func=self._update_npc_ai,
-                args=(dt,),
-                priority=TaskPriority.HIGH,
-                name="npc_ai"
-            )
-            
-            # ===== Atualizar projéteis (MÉDIA prioridade) ===
-            def update_projectiles():
-                for p in self.projectiles:
-                    p.update(dt)
-            
-            self.task_queue.add(
-                func=update_projectiles,
-                priority=TaskPriority.MEDIUM,
-                name="update_projectiles"
-            )
-            
-            # ===== Detecção de colisões (CRÍTICO - afeta gameplay) ===
-            self.task_queue.add(
-                func=self._check_collisions,
-                priority=TaskPriority.CRITICAL,
-                name="collision_check"
-            )
-            
-            # ===== Logging/UI (BAIXA prioridade - pode esperar) ===
-            self.task_queue.add(
-                func=self._update_monitoring,
-                priority=TaskPriority.LOW,
-                name="monitoring"
-            )
-            
-            # ===== NOVO: Processa todas as tarefas ===
-            frame_stats = self.task_queue.process_frame()
-            
-            # ===== DEBUG: Mostrar se fila está acumulando ===
-            if self.task_queue.get_queue_size() > 15:
-                print(f"⚠️ Fila acumulando: {self.task_queue.get_queue_size()} tarefas")
-            
-            # ... resto do código do update que não foi refatorado ...
-"""
-
-# ============================================================================
-# PASSO 5: Refatorar métodos grandes em métodos helper
-# ============================================================================
-
-NEW_METHODS = """
-def _check_collisions(self):
-    '''Colisão de projéteis com tanques.'''
-    for p in list(self.projectiles):
-        if not p.is_alive:
-            self.projectiles.remove(p)
-            continue
-        # Verifica colisão com tanques
-        if p.owner is not self.player and self._collide_proj_tank(p, self.player):
-            self.player.hit(p.damage)
-            p.is_alive = False
-            # NPC acertou
-            self.npc_brain.report_outcome(
-                success=True,
-                damage_dealt=p.damage,
-                outcome_type="hit"
-            )
-        elif p.owner is not self.npc and self._collide_proj_tank(p, self.npc):
-            self.npc.hit(p.damage)
-            p.is_alive = False
-            # Jogador acertou
-            self.npc_brain.report_outcome(
-                success=False,
-                damage_taken=p.damage,
-                outcome_type="hit_by_player"
-            )
-
-def _update_monitoring(self):
-    '''Atualiza monitoring e logging (LOW priority).'''
-    self._monitor_update_timer -= self.dt
-    if self._monitor_update_timer <= 0:
-        # Envia stats para monitor
-        self.rbc_monitor.update_live({
-            "player_health": self.player.health,
-            "npc_health": self.npc.health,
-            "frame": self.frame_counter
-        })
-        self._monitor_update_timer = 0.5
-"""
-
-# ============================================================================
-# PASSO 6: Resumo das mudanças
-# ============================================================================
-
-SUMMARY = """
-RESUMO DAS MUDANÇAS:
-
-1. ✅ Imports (imports psutil, task_queue)
-2. ✅ Inicializa TaskQueue no __init__
-3. ✅ Adiciona método get_cpu_usage()
-4. ✅ Refatora update() para usar task_queue:
-   - Input → CRITICAL
-   - Física jogador → CRITICAL
-   - Colisões → CRITICAL
-   - NPC AI → HIGH
-   - Projéteis → MEDIUM
-   - Logging → LOW
-5. ✅ Extrai colisões em _check_collisions()
-6. ✅ Extrai monitoring em _update_monitoring()
-
-RESULTADO:
-- Tarefas críticas executam sempre
-- Tarefas não-críticas distribuídas nos frames
-- CPU mais estável e previsível
-- Escalável para múltiplos NPCs
-
-PRÓXIMO PASSO:
-Se tiver 2+ NPCs:
-- Copie a lógica do NPC_AI em um loop
-- Cada iteração é uma tarefa HIGH
-"""
-
-# ============================================================================
-# EXEMPLO: Versão completa do update() refatorado
-# ============================================================================
-
-COMPLETE_REFACTORED_UPDATE = """
+```python
 def update(self, dt):
     if self.state == "playing":
         self.frame_counter += 1
+        self._monitor_update_timer += dt
+
+        # 1. Atualização do uso de CPU no motor da fila
+        cpu_usage = self.get_cpu_usage()
+        self.task_queue.update_cpu_usage(cpu_usage)
+
+        # 2. Enfileiramento de tarefas por prioridade
+        
+        # CRÍTICO: Entrada do jogador (teclas de movimento)
+        self.task_queue.add(
+            func=self._handle_player_input,
+            args=(dt,),
+            priority=TaskPriority.CRITICAL,
+            name="player_input"
+        )
+        
+        # CRÍTICO: Atualização de cooldowns das armas
+        self.task_queue.add(
+            func=self._update_players_cooldown,
+            args=(dt,),
+            priority=TaskPriority.CRITICAL,
+            name="players_cooldown"
+        )
+        
+        # ALTA: Percepção espacial e Tomada de Decisão RBC do NPC
+        self.task_queue.add(
+            func=self._update_npc_perception_and_ai,
+            args=(dt,),
+            priority=TaskPriority.HIGH,
+            name="npc_perception_ai"
+        )
+        
+        # MÉDIA: Atualização da posição física dos projéteis
+        self.task_queue.add(
+            func=self._update_all_projectiles,
+            args=(dt,),
+            priority=TaskPriority.MEDIUM,
+            name="update_projectiles"
+        )
+        
+        # CRÍTICO: Detecção de colisões entre projéteis e tanques
+        self.task_queue.add(
+            func=self._check_all_collisions,
+            priority=TaskPriority.CRITICAL,
+            name="collision_check"
+        )
+        
+        # CRÍTICO: Verificação de condição de fim de jogo (Game Over)
+        self.task_queue.add(
+            func=self._update_game_state,
+            priority=TaskPriority.CRITICAL,
+            name="game_state_check"
+        )
+        
+        # BAIXA: Telemetria Web periodicamente
+        self.task_queue.add(
+            func=self._update_rbc_monitor_periodic,
+            priority=TaskPriority.LOW,
+            name="rbc_monitor_update"
+        )
+
+        # 3. Execução das tarefas do frame respeitando o limite
+        self.task_queue.process_frame()
+```
+
+---
+
+## 🎯 Resumo das Prioridades Aplicadas
+
+| Tarefa | Nome do Callback | Prioridade | Comportamento |
+| :--- | :--- | :--- | :--- |
+| **Input do Jogador** | `_handle_player_input` | `CRITICAL` | Executa no mesmo frame. Nunca é adiada. |
+| **Cooldown de Armas** | `_update_players_cooldown` | `CRITICAL` | Executa no mesmo frame. |
+| **Colisões Físicas** | `_check_all_collisions` | `CRITICAL` | Executa no mesmo frame para evitar bugs de colisão. |
+| **Fim de Jogo** | `_update_game_state` | `CRITICAL` | Executa no mesmo frame. |
+| **IA & Percepção NPC** | `_update_npc_perception_and_ai` | `HIGH` | Executada prioritariamente após tarefas críticas. |
+| **Movimento de Projéteis**| `_update_all_projectiles` | `MEDIUM` | Escalonada de forma fluida nos quadros. |
+| **Telemetria Web** | `_update_rbc_monitor_periodic` | `LOW` | Executada quando há folga de CPU. |
+
+---
+
+## ✅ Benefícios Obtidos
+
+1. **Mitigação de Picos de Processamento**: Tarefas de menor prioridade são adiadas sem prejudicar a responsabilidade dos controles ou a detecção de colisões.
+2. **Estabilidade de FPS**: O algoritmo reduz dinamicamente o número de tarefas secundárias por frame se a CPU ultrapassar 70%.
+3. **Escalabilidade**: A estrutura facilita a adição de múltiplos NPCs no futuro simplesmente enfileirando iterações como tarefas `HIGH`.

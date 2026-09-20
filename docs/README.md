@@ -1,8 +1,7 @@
-# Documentation Index
+# Índice da Documentação Técnica
 
-- [Arquitetura do projeto](ARQUITETURA.md)
-- [Quick start da task queue](QUICK_START.md)
-- [Guia completo da task queue](TASK_QUEUE_README.md)
-- [Guia de integração da task queue](INTEGRATION_GUIDE.md)
-- [Exemplos](examples/README.md)
-- [Documentação do RBC](README_RBC.md)
+- [Especificação Arquitetural](ARQUITETURA.md) - Arquitetura geral, fluxo de dados e esquema relacional do SQLite.
+- [Guia de Início Rápido](QUICK_START.md) - Passo a passo para execução do projeto e controles.
+- [Documentação do RBC](README_RBC.md) - Detalhamento do ciclo RBC, similaridade ponderada, ações e recompensas.
+- [Gerenciamento da Fila de Tarefas](TASK_QUEUE_README.md) - Teoria e especificações da `AdaptiveTaskQueue`.
+- [Manual de Integração da TaskQueue](INTEGRATION_GUIDE.md) - Mapeamento de prioridades e escalonamento no game loop.
